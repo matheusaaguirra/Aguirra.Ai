@@ -81,7 +81,9 @@ async function handle(request: Request, args: RouteHandlerArgs): Promise<Respons
   try {
     safeOrigin(request); const url = new URL(request.url), resource = args.params.resource;
     if (resource === "session" && request.method === "GET") {
-      session = await getSession(request, true); return json({ user: session?.user || null, ai: !!(process.env.AI_GATEWAY_API_KEY || process.env.VERCEL_OIDC_TOKEN), search: !!(process.env.AI_GATEWAY_API_KEY || process.env.VERCEL_OIDC_TOKEN) }, 200, session?.cookies);
+      session = await getSession(request, true);
+      const gatewayAvailable = !!(process.env.AI_GATEWAY_API_KEY || process.env.VERCEL_OIDC_TOKEN || request.headers.get("x-vercel-oidc-token"));
+      return json({ user: session?.user || null, ai: gatewayAvailable, search: gatewayAvailable }, 200, session?.cookies);
     }
     if (resource === "auth" && request.method === "POST") {
       const input = z.object({ mode: z.enum(["login", "register"]), email: z.string().email().max(254), password: z.string().min(8).max(128) }).parse(await body(request));
