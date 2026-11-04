@@ -1,0 +1,33 @@
+{
+  "name": "aguirra-ai",
+  "version": "0.0.0",
+  "type": "module",
+  "imports": {
+    "#*": "./agent/*",
+    "#evals/*": "./evals/*"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "deploy": "eve deploy",
+    "dev": "node --env-file-if-exists=.env.local scripts/dev.mjs",
+    "eval": "eve eval",
+    "start": "eve start",
+    "typecheck": "tsc",
+    "dev:agent": "eve dev --no-ui",
+    "test": "node --experimental-strip-types --test tests/*.test.ts"
+  },
+  "dependencies": {
+    "@vercel/connect": "2.7.0",
+    "ai": "7.0.162",
+    "eve": "1.0.0-rc.4",
+    "just-bash": "3.6.0",
+    "zod": "4.5.4"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "typescript": "7.0.2"
+  },
+  "engines": {
+    "node": "24.x"
+  }
+}
