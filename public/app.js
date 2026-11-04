@@ -1,7 +1,7 @@
 (function () {
   'use strict';
   var M = window.AguirraMemory, storageKey = 'aguirra.local.v1', preferencesKey = 'aguirra.preferences.v1';
-  var user = null, busy = false, activeView = 'home', currentThread = null, memoryFilter = 'all', editingMemory = null, authMode = 'login', toastTimer, modalFocus = null;
+  var user = null, localApi = false, busy = false, activeView = 'home', currentThread = null, memoryFilter = 'all', editingMemory = null, authMode = 'login', toastTimer, modalFocus = null;
   var oldAndroid = /Android 4\./.test(navigator.userAgent), state = empty(), preferences = readJSON(preferencesKey, { low_power: oldAndroid, voice: false });
   function $(id) { return document.getElementById(id); }
   function empty() { return { memories: [], threads: [], messages: [], topics: [], settings: { memory_enabled: true } }; }
@@ -40,8 +40,8 @@
     $('home-memory-count').textContent = pad(count); $('nav-memory-count').textContent = String(count);
     $('context-description').textContent = count ? 'Preferências, objetivos e ideias que dão contexto às suas próximas conversas.' : 'Seu núcleo começa com uma conversa. Conte uma preferência ou algo que queira guardar.';
     $('last-connection').textContent = count ? state.memories[0].content : 'As ideias que você guardar aparecerão aqui.';
-    $('account-name').textContent = user ? (user.email || 'Sua conta') : 'Seu espaço pessoal'; $('avatar').textContent = user ? user.email.charAt(0).toUpperCase() : 'V'; $('account-state').textContent = user ? 'Memória sincronizada' : 'Memória neste aparelho';
-    $('chat-storage-label').textContent = user ? 'Sincronizado na sua conta' : 'Neste aparelho';
+    $('account-name').textContent = user ? (user.email || 'Sua conta') : 'Seu espaço pessoal'; $('avatar').textContent = user ? user.email.charAt(0).toUpperCase() : 'V'; $('account-state').textContent = user ? (localApi ? 'Memória no seu computador' : 'Memória sincronizada') : 'Memória neste aparelho';
+    $('chat-storage-label').textContent = user ? (localApi ? 'Salvo no seu computador' : 'Sincronizado na sua conta') : 'Neste aparelho';
     renderSettings(); if (activeView === 'brain') renderBrain(); if (activeView === 'chat') renderMessages(); if (activeView === 'history') renderHistory();
   }
   function renderMessages() {
@@ -79,11 +79,11 @@
     text = String(text || '').trim(); if (!text || busy) return;
     if (text.length > 4000) { toast('Sua mensagem deve ter até 4.000 caracteres.'); return; }
     text = M.redact(text); go('chat'); $('home-input').value = ''; $('chat-input').value = '';
-    if (!user) { ensureThread(text); var message = addMessage('user', text); learn(text, message.id); var answer = localAnswer(text, M.extract(text)); addMessage('assistant', answer); saveLocal(); render(); speak(answer); return; }
+    if (!user) { ensureThread(text); var message = addMessage('user', text); learn(text, message.id); var answer = localAnswer(text, state.settings.memory_enabled !== false ? M.extract(text) : []); addMessage('assistant', answer); saveLocal(); render(); speak(answer); return; }
     var hadThread = currentThread; ensureThread(text); var pending = addMessage('user', text); renderMessages(); setBusy(true);
     request('POST', '/api/chat', { message: text, thread_id: hadThread, request_id: pending.id }, function (err, result) {
       setBusy(false);
-      if (err) { addMessage('assistant', err.message, true); toast(err.message); renderMessages(); if (err.status === 401) openAuth(); return; }
+      if (err) { addMessage('assistant', err.message, true); toast(err.message); renderMessages(); if (result && result.thread_id) { currentThread = result.thread_id; loadData(); } if (err.status === 401) openAuth(); return; }
       currentThread = result.thread_id; loadData(function () { renderMessages(); if (result.learned) toast('Nova conexão guardada no seu núcleo.'); speak(result.reply); });
     });
   }
@@ -125,8 +125,8 @@
   }
   function renderSettings() {
     $('setting-low-power').checked = !!preferences.low_power; $('setting-voice').checked = !!preferences.voice; $('setting-memory').checked = state.settings.memory_enabled !== false;
-    $('settings-storage').textContent = user ? 'Sua memória está sincronizada na sua conta. O mapa e o histórico aparecem nos aparelhos em que você entrar.' : 'Suas memórias estão neste navegador. Entre para sincronizar entre aparelhos.';
-    $('settings-login').textContent = user ? 'Gerenciar minha conta ↗' : 'Entrar ou criar conta ↗';
+    $('settings-storage').textContent = user ? (localApi ? 'O núcleo e o histórico ficam no seu computador. O tablet e o PC acessam a mesma memória pela rede local, sem banco pago.' : 'Sua memória está sincronizada na sua conta. O mapa e o histórico aparecem nos aparelhos em que você entrar.') : 'Suas memórias estão neste navegador. Conecte-se para usar a memória compartilhada.';
+    $('settings-login').textContent = user ? 'Gerenciar meu acesso ↗' : (localApi ? 'Conectar ao meu computador ↗' : 'Entrar ou criar conta ↗');
     $('sync-local').hidden = !user || !(readJSON(storageKey, empty()).memories || []).length;
     $('compatibility-description').textContent = oldAndroid ? 'Android antigo detectado. Recomendamos o modo econômico. Voz e tela cheia dependem do navegador.' : 'O modo econômico funciona em qualquer aparelho. Os recursos de voz aparecem conforme a compatibilidade do navegador.';
     document.body.className = preferences.low_power ? 'low-power' : '';
@@ -134,7 +134,7 @@
   }
   function openModal(id) { modalFocus = document.activeElement; $(id).hidden = false; var input = $(id).querySelector('input,textarea'); if (input) input.focus(); }
   function closeModal(id) { $(id).hidden = true; if (modalFocus && modalFocus.focus) modalFocus.focus(); }
-  function openAuth() { $('auth-feedback').textContent = ''; $('auth-title').textContent = user ? 'Sua conta está conectada.' : 'Entre no seu espaço.'; $('auth-form').hidden = !!user; $('toggle-auth').hidden = !!user; $('logout-button').hidden = !user; openModal('auth-modal'); }
+  function openAuth() { $('auth-feedback').textContent = ''; $('auth-title').textContent = user ? 'Seu acesso está conectado.' : (localApi ? 'Conecte ao seu computador.' : 'Entre no seu espaço.'); $('auth-form').hidden = !!user; $('toggle-auth').hidden = !!user || localApi; $('logout-button').hidden = !user; $('auth-email').hidden = localApi; $('auth-email').required = !localApi; document.querySelector('label[for="auth-email"]').hidden = localApi; document.querySelector('label[for="auth-password"]').textContent = localApi ? 'Código de acesso exibido no computador' : 'Senha'; if (localApi) { $('auth-email').value = 'local@aguirra.invalid'; authMode = 'login'; $('auth-submit').textContent = 'Conectar'; document.querySelector('#auth-modal .modal > p').textContent = 'Digite o código que aparece ao iniciar o Aguirra no computador. Nenhuma conta ou API paga é necessária.'; } openModal('auth-modal'); }
   function openMemory(m) { editingMemory = m ? m.id : null; $('memory-category').value = m ? m.category : 'preferences'; $('memory-content').value = m ? m.content : ''; $('memory-feedback').textContent = ''; $('memory-title').textContent = m ? 'Ajustar uma conexão.' : 'O que devo guardar?'; openModal('memory-modal'); }
   function deleteMemory(m) {
     if (!window.confirm('Esquecer esta memória? Ela deixará de entrar nas próximas respostas. O texto original continua no histórico até você apagá-lo.')) return;
@@ -185,5 +185,5 @@
   function setStatus(text) { wipe($('connection-status')); $('connection-status').appendChild(el('i')); $('connection-status').appendChild(document.createTextNode(text)); }
   state = readJSON(storageKey, empty()); if (!state.memories || !state.messages || !state.threads || !state.topics || !state.settings) state = empty();
   bind(); setupVoice(); tick(); setInterval(tick, 15000); render(); startOrb();
-  request('GET', '/api/session', null, function (err, data) { if (err) { setStatus('Neste aparelho'); $('server-capabilities').textContent = 'Servidor indisponível. Memória local, mapa e histórico continuam funcionando.'; return; } user = data.user || null; setStatus(user ? 'Conta conectada' : 'Neste aparelho'); $('server-capabilities').textContent = 'Conversa com IA: ' + (data.ai ? 'configurada' : 'aguardando configuração') + '. Pesquisa web: ' + (data.search ? 'configurada' : 'aguardando configuração') + '.'; if (user) loadData(); else render(); });
+  request('GET', '/api/session', null, function (err, data) { if (err) { setStatus('Neste aparelho'); $('server-capabilities').textContent = 'Servidor indisponível. Memória local, mapa e histórico continuam funcionando.'; return; } user = data.user || null; localApi = !!data.local; setStatus(user ? (localApi ? 'Computador conectado' : 'Conta conectada') : 'Neste aparelho'); $('server-capabilities').textContent = (localApi ? 'IA processada no computador com Ollama. ' : 'A conversa com IA é usada pelo endereço local do seu computador. ') + 'Notícias por feeds RSS públicos. Nenhuma API paga é utilizada.'; if (user) loadData(); else render(); });
 }());

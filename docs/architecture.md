@@ -6,13 +6,14 @@ O tablet apresenta a interface. IA, pesquisa e autenticação ficam no servidor.
 flowchart TD
   T["Tablet Android 4.4 / computador"] --> UI["Interface ES5 · Canvas 2D"]
   UI --> API["API Node.js · cookies HttpOnly"]
-  API --> AUTH["Supabase Auth"]
-  API --> DB["Postgres · dados por usuário"]
+  API --> AUTH["Código local / Supabase Auth"]
+  API --> DB["SQLite local / Postgres Free"]
   API --> EVE["Aguirra · agente eve"]
   DB --> MEM["Núcleo recuperado por relevância"]
   MEM --> EVE
-  EVE --> GW["AI Gateway"]
-  GW --> SEARCH["Pesquisa web nativa"]
+  EVE --> MODEL["Ollama no próprio PC"]
+  API --> RSS["Feeds RSS públicos"]
+  RSS --> EVE
   EVE --> API
   API --> DB
 ```
@@ -36,8 +37,8 @@ Cada memória tem conteúdo, categoria, origem, data e, quando disponível, a me
 2. Verificar repetição do identificador e consumir a cota atômica.
 3. Salvar pedido e assuntos; extrair declarações explícitas se habilitado.
 4. Recuperar preferências gerais e memórias relevantes por palavras. O núcleo pequeno não exige embeddings pagos.
-5. Abrir sessão curta de eve com núcleo atualizado e até dez mensagens recentes da conversa.
-6. Consultar hora ou pesquisar na web quando necessário. Shell, arquivos e ações externas não são ferramentas disponíveis.
+5. Para conversa generativa local, abrir sessão curta de eve com núcleo atualizado e até seis mensagens recentes da conversa.
+6. Data/hora, registro de memórias e manchetes RSS são resolvidos sem chamar modelo. O modelo local pode consultar RSS; não há pesquisa paga, shell ou ações externas.
 7. Persistir resposta e fontes disponíveis nos resultados. Encerrar a sessão. Workflow solicita retenção zero ao término.
 
 Se a IA falhar, o pedido e as memórias já salvos permanecem no histórico. O erro é informado sem simular geração real.
@@ -57,14 +58,19 @@ Essa exclusão diz respeito aos registros do aplicativo. Retenção de logs e da
 
 ## Implantação e acesso
 
-Vercel executa Node 24 e Workflow. Supabase Auth/Postgres são um projeto dedicado. Gateway usa OIDC na Vercel. O sandbox virtual just-bash não cria VM; ferramentas de shell não são disponibilizadas.
+O modo principal é local: Node 24, eve, Ollama em loopback e SQLite no computador. O tablet acessa a interface por HTTP na mesma rede privada. O SQLite mantém um documento transacional com conversas, núcleo, assuntos, cotas e hashes das sessões. O código local é armazenado com scrypt; tokens de sessão são aleatórios e persistidos como hashes. Escritas validam Origin.
 
-O servidor verifica a sessão no Supabase e acessa o PostgREST com o token do próprio usuário, preservando RLS. Não usa service_role. Cookies são HttpOnly e Secure em HTTPS; escritas validam Origin para navegadores antigos sem SameSite.
+Na hospedagem online, a IA é bloqueada antes de criar uma sessão de modelo. A interface e a sincronização opcional usam Vercel Hobby e Supabase Free. O servidor consulta o Supabase com o token do próprio usuário e preserva RLS. Não utiliza service_role. Cookies são HttpOnly e Secure em HTTPS. O sandbox virtual não cria VM; nenhuma ferramenta de shell é disponibilizada.
+
+Não há fallback para AI Gateway, Gemini ou outro modelo pago. O único destino de inferência permitido é Ollama HTTP em localhost. Modelos cloud são rejeitados. As notícias vêm de feeds públicos com URLs fixas; não são uma busca geral da web.
 
 ## Limites atuais
 
-- 30 pedidos/hora e 100/dia por usuário. Limite de sessão do modelo é aproximado, não teto de faturamento. Pesquisa e infraestrutura têm custos próprios.
-- UI carrega até 100 conversas, 500 memórias e 1.000 mensagens recentes. A exportação corresponde aos dados carregados. Paginação e exportações maiores são evolução prevista.
-- Extração automática por declarações explícitas. Não há extração semântica geral, embeddings ou associação livre de perguntas com preferências.
-- Login exige criar conta e confirmar e-mail conforme o Supabase. Configurar Site URL para produção melhora o retorno dos links.
-- Checklist no tablet: HTTPS, digitação, rolagem, recarregamento, login, voz, modo econômico e permanência em exibição.
+- 30 pedidos/hora e 100/dia por acesso. É um controle de uso, não contratação de capacidade.
+- UI carrega até 100 conversas, 500 memórias e 1.000 mensagens recentes. A exportação corresponde aos dados carregados. Paginação completa é evolução prevista.
+- Extração automática por declarações explícitas. Não há embeddings ou associação automática de perguntas com preferências.
+- Preferências conflitantes ainda são revisadas no mapa; não há consolidação semântica automática.
+- O modo local exige PC ligado e tablet na mesma rede. Fora dela, a conversa com Ollama não fica disponível automaticamente.
+- Voz, TLS, rolagem e desempenho no Android 4.4 precisam de teste no aparelho real.
+
+Veja [o guia sem custo](sem-custo.md).

@@ -8,11 +8,13 @@
 
 Assistente pessoal web com conversas, pesquisa e um núcleo de memória que você pode entender, editar e esquecer.
 
-`TypeScript` · `eve` · `Supabase` · `AI Gateway` · `JavaScript ES5`
+`Ollama local` · `TypeScript` · `SQLite` · `Supabase Free` · `JavaScript ES5`
 
 </div>
 
 ---
+
+![Central do Aguirra](docs/aguirra-preview.jpg)
 
 ## O que já existe
 
@@ -22,10 +24,11 @@ Assistente pessoal web com conversas, pesquisa e um núcleo de memória que voc�
 - Formação conservadora de memórias por declarações explícitas: `Prefiro respostas curtas`, `Meu nome é…`, `Meu objetivo é…`, `Lembre que…`.
 - Criação, edição, exclusão, importação de memórias locais e exportação JSON dos dados carregados.
 - Conta e sincronização na nuvem pelo Supabase, com isolamento por usuário.
-- Agente no servidor com pesquisa web nativa via AI Gateway e ferramenta de data/hora.
+- IA local no computador com Ollama; nenhum endpoint de modelo pago.
+- Manchetes por feeds RSS públicos gratuitos e ferramenta de data/hora.
 - Interface leve, modo econômico e melhorias opcionais de voz e tela cheia.
 
-**Sem login**, a memória e o histórico funcionam neste navegador. As respostas locais são limitadas a memória, data/hora e orientações de uso. Conversa generativa e pesquisa exigem conta e integração de IA ativa; não há respostas fictícias de demonstração.
+**Sem login**, a memória e o histórico funcionam neste navegador. As respostas locais são limitadas a memória, data/hora e orientações de uso. A conversa completa roda no computador com Ollama, acessada pelo endereço local; não há respostas fictícias de demonstração.
 
 ## Memória, de verdade
 
@@ -35,28 +38,30 @@ O Aguirra recupera contexto para responder melhor. Isso **não retreina os pesos
 
 Veja o [mapa da arquitetura, fluxo da memória e decisões técnicas](docs/architecture.md).
 
-## Rodar
+## Rodar sem API paga
 
-Requer Node.js **24.x** e npm.
+No Windows, instale **Node.js 24.x** e **Ollama**, baixe este repositório e abra **Iniciar-Aguirra.cmd**.
+
+O terminal mostra o código de acesso e o endereço para abrir no tablet, na mesma rede do computador.
 
 ```bash
 npm ci
-cp .env.example .env.local
-# Preencha .env.local com os valores do seu projeto.
-npm run dev
+ollama pull qwen3:4b
+ollama create aguirra-local -f Modelfile
+npm run local
 ```
 
-Frontend: `http://localhost:3000`. O script inicia o agente na porta 2000 e mantém a API na mesma origem.
+**O PC precisa ficar ligado.** O tablet apresenta a interface; o modelo e o SQLite ficam no computador. Nenhuma chave de IA ou cartão é necessário. O download inicial do modelo tem aproximadamente 2,5 GB.
 
-### Banco
+O [guia sem custo](docs/sem-custo.md) explica instalação, rede, código de acesso e limites. Os endpoints externos e modelos cloud estão bloqueados. Não há fallback para uma API paga.
 
-Crie um projeto Supabase dedicado e aplique [database/schema.sql](database/schema.sql). A aplicação usa `SUPABASE_URL` e `SUPABASE_PUBLISHABLE_KEY` e o token do usuário autenticado; nenhuma chave administrativa é necessária.
+### Hospedagem online opcional
 
-Configure no painel de Auth o Site URL para a origem publicada. A confirmação de e-mail segue a configuração do Supabase. Não use dados do WealthOS ou de outro aplicativo como fixtures deste projeto.
+A versão online oferece interface, memória, histórico e manchetes RSS. A sincronização usa o Supabase Free e a hospedagem Vercel Hobby, respeitando suas cotas. A geração de IA fica desativada na hospedagem. O aplicativo não faz upgrade automático de planos.
 
-### IA e implantação
+Para reproduzir a sincronização, use um projeto Supabase dedicado e aplique [database/schema.sql](database/schema.sql). A aplicação usa apenas a chave publicável e o token do usuário, preservando RLS; não utiliza chave administrativa. Configure o Site URL de Auth para a origem publicada.
 
-O modelo inicial é o padrão de eve e fica em [agent/agent.ts](agent/agent.ts). Confira o catálogo atual e o orçamento antes de trocá-lo. Na Vercel, a IA usa OIDC do projeto. No desenvolvimento local, configure `AI_GATEWAY_API_KEY` de modo seguro.
+### Verificar
 
 ```bash
 npm run typecheck
@@ -64,9 +69,7 @@ npm test
 npm run build
 ```
 
-Fora da Vercel, o build produz o servidor de auto-hospedagem. Na Vercel, produz Build Output e exige as credenciais de implantação do projeto. Não force `VERCEL=1` sem um projeto vinculado e credenciais válidas.
-
-Planos gratuitos e créditos de teste têm limites. Não há promessa de IA ou pesquisa ilimitadas sem custo. Cotas do aplicativo não substituem um orçamento do provedor.
+O build produz o servidor local fora da Vercel. Na Vercel, produz o Build Output. Não force VERCEL=1 sem um projeto vinculado e as credenciais de implantação.
 
 ## Android 4.4
 
@@ -78,7 +81,9 @@ O frontend usa JavaScript ES5, XMLHttpRequest, SVG e Canvas 2D. O modo econômic
 
 - `npm test`: extração, bloqueio de credenciais/hipóteses, recuperação, paridade entre cliente e servidor, cookies e origem de pedidos.
 - [tests/rls.sql](tests/rls.sql): isolamento de usuários, escrita cruzada, vínculo da conversa, cota atômica e exclusão. Fixtures transacionais são revertidas.
-- Inspeção visual e teste de persistência local no navegador.
+- Testes de código de acesso, SQLite, RSS e bloqueio de modelos externos.
+- Protocolo do adaptador Ollama verificado com servidor local de teste; nenhuma API paga.
+- Sintaxe ES5 verificada automaticamente e persistência inspecionada no navegador.
 
 Limitações atuais, incluindo paginação e consolidação de preferências conflitantes: [arquitetura](docs/architecture.md).
 

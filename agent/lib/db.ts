@@ -1,3 +1,4 @@
+import { localAuth, localDb, localMode } from "./local-store.ts";
 export class AppError extends Error { status: number; constructor(status: number, message: string) { super(message); this.status = status; } }
 export interface Session { user: { id: string; email: string }; token: string; cookies: string[]; }
 export function config() {
@@ -6,10 +7,11 @@ export function config() {
   return { url, key };
 }
 export async function authFetch(path: string, body?: unknown, token?: string) {
+  if (localMode()) { try { return localAuth(path, body, token); } catch (error) { throw new AppError((error as any).status || 503, (error as Error).message); } }
   const { url, key } = config();
   const response = await fetch(`${url}/auth/v1/${path}`, { method: body ? "POST" : "GET", headers: { apikey: key, "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) }, body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(15_000) });
   const data = await response.json();
-  if (!response.ok) throw new AppError(response.status === 429 ? 429 : 401, response.status === 429 ? "Muitas tentativas. Aguarde alguns minutos." : (data.error_code === "email_not_confirmed" ? "Confirme seu e-mail antes de entrar." : "Não consegui autenticar. Confira e-mail, senha e a confirmação da sua conta."));
+  if (!response.ok) throw new AppError(response.status >= 500 ? 503 : (response.status === 429 ? 429 : 401), response.status >= 500 ? "O serviço de autenticação está indisponível. Tente novamente mais tarde." : (response.status === 429 ? "Muitas tentativas. Aguarde alguns minutos." : (data.error_code === "email_not_confirmed" ? "Confirme seu e-mail antes de entrar." : "Não consegui autenticar. Confira e-mail, senha e a confirmação da sua conta.")));
   return data;
 }
 export function sessionCookies(data: { access_token: string; refresh_token: string }, request: Request) {
@@ -25,6 +27,7 @@ export async function getSession(request: Request, optional = false): Promise<Se
   throw new AppError(401, "Entre na sua conta para conversar com a IA e acessar sua memória na nuvem.");
 }
 export async function db<T = any[]>(session: Session, path: string, method = "GET", body?: unknown, prefer = "return=representation"): Promise<T> {
+  if (localMode()) { try { return localDb(path, method, body) as T; } catch (error) { throw new AppError((error as any).status || 503, "Não consegui concluir a operação no banco local."); } }
   const { url, key } = config();
   const response = await fetch(`${url}/rest/v1/${path}`, { method, headers: { apikey: key, Authorization: `Bearer ${session.token}`, "Content-Type": "application/json", Prefer: prefer }, body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(15_000) });
   if (!response.ok) { if (response.status === 409) throw new AppError(409, "Este pedido já foi recebido. Confira o histórico antes de reenviar."); throw new AppError(response.status === 401 ? 401 : 503, "Não consegui salvar ou recuperar seus dados. Tente novamente."); }
