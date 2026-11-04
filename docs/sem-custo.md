@@ -58,6 +58,16 @@ Vercel Hobby e Supabase Free têm cotas; não foi ativado plano pago nem overage
 
 RSS é uma consulta limitada a feeds públicos, não uma busca de toda a web. Há links e horários das publicações. Não verifica cotações, qualquer site ou toda notícia possível. O modelo local também pode errar.
 
+## Voz sintética
+
+Respostas são lidas automaticamente por padrão. Em Configurações você pode escolher uma voz, testar e interromper a leitura. Cada resposta também tem um botão **Ouvir resposta**. O microfone envia a frase reconhecida para a conversa quando o reconhecimento estiver disponível.
+
+A primeira opção é uma voz em português instalada no navegador/aparelho. No modo local do Windows, existe uma alternativa: o PC gera um arquivo WAV com System.Speech e o tablet reproduz o áudio. Essa opção não usa API paga nem exige que o tablet tenha SpeechSynthesis. O computador precisa ter uma voz em português instalada. Você pode selecionar **Voz do meu computador (Windows)** nas configurações.
+
+O Windows sintetiza o áudio em memória. O texto é passado por stdin a um script fixo; não vira comando. Nenhum áudio de resposta é enviado a provedor de voz ou salvo no repositório. Respostas de voz são limitadas a 6.000 caracteres. Navegadores podem exigir um toque inicial para liberar áudio: use Ouvir resposta.
+
+O navegador e a voz instalada no Android 4.4 ainda precisam ser testados no aparelho real. Se o microfone da página não funcionar, a digitação e o ditado do próprio teclado do Android continuam sendo alternativas de entrada.
+
 ## Situação da verificação
 
 O código, a memória, o login local, a persistência SQLite, a sintaxe ES5, o isolamento na nuvem e o protocolo de conexão ao modelo são verificados por testes. O protocolo de IA é testado com um servidor local de teste, sem chamada paga. A inferência real com Ollama e a compatibilidade no tablet precisam ser verificadas no computador e no aparelho do usuário.

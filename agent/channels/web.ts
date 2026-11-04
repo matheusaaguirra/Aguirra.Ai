@@ -5,6 +5,7 @@ import { AppError, authFetch, config, db, getSession, loadData, safeOrigin, sess
 import { categories, extract, normalize, redact, relevant, sensitive, topics, type Memory } from "../lib/memory";
 import { localLogout, localMode } from "../lib/local-store.ts";
 import { readNews, headlinesText } from "../lib/news.ts";
+import { serverVoiceAvailable, synthesizeWave } from "../lib/voice.ts";
 
 const uuid = z.string().uuid();
 const memoryInput = z.object({ id: uuid.nullish(), category: z.enum(categories), content: z.string().trim().min(3).max(500) });
@@ -93,7 +94,7 @@ async function handle(request: Request, args: RouteHandlerArgs): Promise<Respons
     safeOrigin(request); const url = new URL(request.url), resource = args.params.resource;
     if (resource === "session" && request.method === "GET") {
       session = await getSession(request, true);
-      return json({ user: session?.user || null, local: localMode(), ai: localMode() && process.env.AGUIRRA_AI_ENABLED !== "false", search: true, search_mode: "rss", paid_apis: false }, 200, session?.cookies);
+      return json({ user: session?.user || null, local: localMode(), ai: localMode() && process.env.AGUIRRA_AI_ENABLED !== "false", search: true, search_mode: "rss", paid_apis: false, tts_server: serverVoiceAvailable() }, 200, session?.cookies);
     }
     if (resource === "auth" && request.method === "POST") {
       const input = z.object({ mode: z.enum(["login", "register"]), email: z.string().email().max(254), password: z.string().min(8).max(128) }).parse(await body(request));
@@ -105,6 +106,15 @@ async function handle(request: Request, args: RouteHandlerArgs): Promise<Respons
       return json({ ok: true }, 200, ["aguirra_access=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0", "aguirra_refresh=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0"]);
     }
     session = await getSession(request); if (!session) throw new AppError(401, "Entre na sua conta.");
+    if (resource === "voice" && request.method === "GET") {
+      if (!serverVoiceAvailable()) throw new AppError(503, "Use a voz do navegador ou execute o Aguirra no Windows para gerar o áudio localmente.");
+      const sample = url.searchParams.get("sample") === "1";
+      let text = "Olá. Eu sou o Aguirra, seu assistente pessoal. Estou pronto para conversar com você.";
+      if (!sample) { const id = uuid.parse(url.searchParams.get("id")); const messages = await db(session, `aguirra_messages?id=eq.${id}&select=role,content`); if (!messages[0] || messages[0].role !== "assistant") throw new AppError(404, "Resposta não encontrada."); text = messages[0].content; }
+      const wave = await synthesizeWave(text);
+      const headers = new Headers({ "Content-Type": "audio/wav", "Cache-Control": "private,no-store", "X-Content-Type-Options": "nosniff" }); session.cookies.forEach(c => headers.append("Set-Cookie",c));
+      return new Response(new Uint8Array(wave).buffer, { headers });
+    }
     if (resource === "data" && request.method === "GET") return json(await loadData(session), 200, session.cookies);
     if (resource === "chat" && request.method === "POST") return await chat(request, args, session);
     if (resource === "memory" && request.method === "POST") { await saveMemory(session, memoryInput.parse(await body(request))); return json({ ok: true }, 200, session.cookies); }

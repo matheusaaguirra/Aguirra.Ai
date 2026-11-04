@@ -26,7 +26,9 @@ Assistente pessoal web com conversas, pesquisa e um núcleo de memória que voc�
 - Conta e sincronização na nuvem pelo Supabase, com isolamento por usuário.
 - IA local no computador com Ollama; nenhum endpoint de modelo pago.
 - Manchetes por feeds RSS públicos gratuitos e ferramenta de data/hora.
-- Interface leve, modo econômico e melhorias opcionais de voz e tela cheia.
+- Interface em tons roxos, ícones vetoriais e marca provisória em quadrado vazio.
+- Voz sintética automática em português, seletor de voz e botão Ouvir resposta. O Windows local pode gerar áudio WAV para navegadores antigos, sem API paga.
+- Modo econômico e tela cheia quando suportados pelo navegador.
 
 **Sem login**, a memória e o histórico funcionam neste navegador. As respostas locais são limitadas a memória, data/hora e orientações de uso. A conversa completa roda no computador com Ollama, acessada pelo endereço local; não há respostas fictícias de demonstração.
 

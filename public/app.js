@@ -1,8 +1,9 @@
 (function () {
   'use strict';
   var M = window.AguirraMemory, storageKey = 'aguirra.local.v1', preferencesKey = 'aguirra.preferences.v1';
-  var user = null, localApi = false, busy = false, activeView = 'home', currentThread = null, memoryFilter = 'all', editingMemory = null, authMode = 'login', toastTimer, modalFocus = null;
-  var oldAndroid = /Android 4\./.test(navigator.userAgent), state = empty(), preferences = readJSON(preferencesKey, { low_power: oldAndroid, voice: false });
+  var user = null, localApi = false, voiceServer = false, busy = false, activeView = 'home', currentThread = null, memoryFilter = 'all', editingMemory = null, authMode = 'login', toastTimer, modalFocus = null;
+  var oldAndroid = /Android 4\./.test(navigator.userAgent), state = empty(), preferences = readJSON(preferencesKey, { low_power: oldAndroid, voice: true });
+  if (preferences.voice_version !== 2) { preferences.voice = true; preferences.voice_version = 2; savePreferences(); }
   function $(id) { return document.getElementById(id); }
   function empty() { return { memories: [], threads: [], messages: [], topics: [], settings: { memory_enabled: true } }; }
   function uid() { return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) { var r = Math.floor(Math.random() * 16); return (c === 'x' ? r : ((r & 3) | 8)).toString(16); }); }
@@ -10,6 +11,8 @@
   function saveLocal() { if (user) return; try { localStorage.setItem(storageKey, JSON.stringify(state)); } catch (e) { toast('O navegador não conseguiu salvar. Exporte seus dados para não perder o contexto.'); } }
   function savePreferences() { try { localStorage.setItem(preferencesKey, JSON.stringify(preferences)); } catch (e) { /* Session-only settings remain usable. */ } }
   function el(tag, cls, content) { var n = document.createElement(tag); if (cls) n.className = cls; if (content !== undefined) n.appendChild(document.createTextNode(String(content))); return n; }
+  function icon(name) { var n = document.createElementNS('http://www.w3.org/2000/svg', 'svg'), use = document.createElementNS('http://www.w3.org/2000/svg', 'use'); n.setAttribute('class', 'icon'); n.setAttribute('viewBox', '0 0 24 24'); n.setAttribute('aria-hidden', 'true'); use.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', '#i-' + name); n.appendChild(use); return n; }
+  function iconLabel(button, name, text) { wipe(button); button.appendChild(icon(name)); button.appendChild(document.createTextNode(' ' + text)); }
   function wipe(n) { while (n.firstChild) n.removeChild(n.firstChild); }
   function toast(text) { $('toast').textContent = text; $('toast').hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(function () { $('toast').hidden = true; }, 5000); }
   function request(method, path, body, callback) {
@@ -40,7 +43,7 @@
     $('home-memory-count').textContent = pad(count); $('nav-memory-count').textContent = String(count);
     $('context-description').textContent = count ? 'Preferências, objetivos e ideias que dão contexto às suas próximas conversas.' : 'Seu núcleo começa com uma conversa. Conte uma preferência ou algo que queira guardar.';
     $('last-connection').textContent = count ? state.memories[0].content : 'As ideias que você guardar aparecerão aqui.';
-    $('account-name').textContent = user ? (user.email || 'Sua conta') : 'Seu espaço pessoal'; $('avatar').textContent = user ? user.email.charAt(0).toUpperCase() : 'V'; $('account-state').textContent = user ? (localApi ? 'Memória no seu computador' : 'Memória sincronizada') : 'Memória neste aparelho';
+    $('account-name').textContent = user ? (user.email || 'Sua conta') : 'Seu espaço pessoal'; wipe($('avatar')); $('avatar').appendChild(icon('user')); $('account-state').textContent = user ? (localApi ? 'Memória no seu computador' : 'Memória sincronizada') : 'Memória neste aparelho';
     $('chat-storage-label').textContent = user ? (localApi ? 'Salvo no seu computador' : 'Sincronizado na sua conta') : 'Neste aparelho';
     renderSettings(); if (activeView === 'brain') renderBrain(); if (activeView === 'chat') renderMessages(); if (activeView === 'history') renderHistory();
   }
@@ -50,9 +53,10 @@
     if (!messages.length) { var intro = el('div', 'empty-state'); intro.appendChild(el('strong', '', 'Uma conversa muda tudo.')); intro.appendChild(el('span', '', 'Pergunte algo ou conte uma preferência. Seu núcleo começa por aqui.')); box.appendChild(intro); }
     for (var i = 0; i < messages.length; i++) {
       var m = messages[i], row = el('article', 'message ' + m.role + (m.failed ? ' message-error' : ''));
-      row.appendChild(el('span', 'message-avatar', m.role === 'user' ? 'V' : 'a')); row.appendChild(el('div', 'message-name', m.role === 'user' ? 'VOCÊ' : 'AGUIRRA'));
+      var avatar = el('span', 'message-avatar' + (m.role === 'assistant' ? ' assistant-mark' : '')); if (m.role === 'user') avatar.appendChild(icon('user')); avatar.setAttribute('aria-hidden', 'true'); row.appendChild(avatar); row.appendChild(el('div', 'message-name', m.role === 'user' ? 'VOCÊ' : 'AGUIRRA'));
       row.appendChild(el('div', 'message-text', m.content));
       if (m.sources && m.sources.length) { var sources = el('div', 'sources'); for (var j = 0; j < m.sources.length; j++) { var source = m.sources[j]; if (!/^https:\/\//i.test(source.url)) continue; var link = el('a', 'source-link', '[' + (j + 1) + '] ' + source.title); link.href = source.url; link.target = '_blank'; link.rel = 'noopener noreferrer'; sources.appendChild(link); } row.appendChild(sources); }
+      if (m.role === 'assistant') (function (message, article) { var hear = el('button', 'message-voice'); iconLabel(hear, 'volume', 'Ouvir resposta'); hear.onclick = function () { window.AguirraVoice.speak(message.content, user ? message.id : null); }; article.appendChild(hear); }(m, row));
       row.appendChild(el('div', 'message-time', localDate(m.created_at, true))); box.appendChild(row);
     }
     box.scrollTop = box.scrollHeight;
@@ -83,7 +87,7 @@
     var hadThread = currentThread; ensureThread(text); var pending = addMessage('user', text); renderMessages(); setBusy(true);
     request('POST', '/api/chat', { message: text, thread_id: hadThread, request_id: pending.id }, function (err, result) {
       setBusy(false);
-      if (err) { addMessage('assistant', err.message, true); toast(err.message); renderMessages(); if (result && result.thread_id) { currentThread = result.thread_id; loadData(); } if (err.status === 401) openAuth(); return; }
+      if (err) { addMessage('assistant', err.message, true); toast(err.message); renderMessages(); if (result && result.thread_id) { currentThread = result.thread_id; loadData(function () { speak(err.message); }); } if (err.status === 401) openAuth(); return; }
       currentThread = result.thread_id; loadData(function () { renderMessages(); if (result.learned) toast('Nova conexão guardada no seu núcleo.'); speak(result.reply); });
     });
   }
@@ -100,20 +104,20 @@
     $('brain-summary').textContent = state.memories.length + ' memórias · ' + state.topics.length + ' assuntos';
     var svg = $('brain-svg'); wipe(svg);
     var cats = ['profile', 'preferences', 'goals', 'projects', 'notes'], coords = [[180, 87], [526, 84], [597, 239], [366, 307], [125, 240]], i;
-    svg.appendChild(svgEl('circle', { cx: 360, cy: 174, r: 110, fill: 'none', stroke: '#293821', 'stroke-dasharray': '2 8' }));
-    svg.appendChild(svgEl('circle', { cx: 360, cy: 174, r: 150, fill: 'none', stroke: '#202d19' }));
+    svg.appendChild(svgEl('circle', { cx: 360, cy: 174, r: 110, fill: 'none', stroke: '#2c2438', 'stroke-dasharray': '2 8' }));
+    svg.appendChild(svgEl('circle', { cx: 360, cy: 174, r: 150, fill: 'none', stroke: '#231b2d' }));
     for (i = 0; i < cats.length; i++) {
       var count = state.memories.filter(function (m) { return m.category === cats[i]; }).length;
-      svg.appendChild(svgEl('line', { x1: 360, y1: 174, x2: coords[i][0], y2: coords[i][1], stroke: count ? '#8a8e57' : '#34422b', 'stroke-width': count ? 1.5 : 1 }));
+      svg.appendChild(svgEl('line', { x1: 360, y1: 174, x2: coords[i][0], y2: coords[i][1], stroke: count ? '#715d8e' : '#362d42', 'stroke-width': count ? 1.5 : 1 }));
       var group = svgEl('g', { tabindex: '0', role: 'button', 'aria-label': M.categories[cats[i]] + ', ' + count + ' memórias', cursor: 'pointer' });
-      group.appendChild(svgEl('circle', { cx: coords[i][0], cy: coords[i][1], r: count ? 20 : 13, fill: count ? '#3b4228' : '#1e2b17', stroke: count ? '#c1b578' : '#52613e' }));
-      group.appendChild(svgEl('text', { x: coords[i][0], y: coords[i][1] + 4, 'text-anchor': 'middle', fill: '#d0c38c', 'font-size': '11', 'font-family': 'monospace' }, String(count)));
-      group.appendChild(svgEl('text', { x: coords[i][0], y: coords[i][1] + 38, 'text-anchor': 'middle', fill: '#9bad86', 'font-size': '12', 'font-family': 'Arial' }, M.categories[cats[i]]));
+      group.appendChild(svgEl('circle', { cx: coords[i][0], cy: coords[i][1], r: count ? 20 : 13, fill: count ? '#342b42' : '#21192b', stroke: count ? '#9b80c1' : '#4f4261' }));
+      group.appendChild(svgEl('text', { x: coords[i][0], y: coords[i][1] + 4, 'text-anchor': 'middle', fill: '#ac92d0', 'font-size': '11', 'font-family': 'monospace' }, String(count)));
+      group.appendChild(svgEl('text', { x: coords[i][0], y: coords[i][1] + 38, 'text-anchor': 'middle', fill: '#9888ad', 'font-size': '12', 'font-family': 'Arial' }, M.categories[cats[i]]));
       (function (category, node) { node.onclick = function () { memoryFilter = category; renderBrain(); }; node.onkeydown = function (event) { if (event.keyCode === 13 || event.keyCode === 32) { event.preventDefault(); memoryFilter = category; renderBrain(); } }; }(cats[i], group)); svg.appendChild(group);
     }
-    svg.appendChild(svgEl('circle', { cx: 360, cy: 174, r: 45, fill: '#303b23', stroke: '#b7ad70', 'stroke-width': '1.5' }));
-    svg.appendChild(svgEl('text', { x: 360, y: 175, 'text-anchor': 'middle', fill: '#e0cf95', 'font-size': '15', 'font-family': 'Georgia' }, 'Aguirra'));
-    svg.appendChild(svgEl('text', { x: 360, y: 194, 'text-anchor': 'middle', fill: '#9caa82', 'font-size': '8', 'font-family': 'monospace', 'letter-spacing': '2' }, 'NÚCLEO'));
+    svg.appendChild(svgEl('circle', { cx: 360, cy: 174, r: 45, fill: '#2f263b', stroke: '#9277b7', 'stroke-width': '1.5' }));
+    svg.appendChild(svgEl('text', { x: 360, y: 175, 'text-anchor': 'middle', fill: '#b89ce0', 'font-size': '15', 'font-family': 'Georgia' }, 'Aguirra'));
+    svg.appendChild(svgEl('text', { x: 360, y: 194, 'text-anchor': 'middle', fill: '#9485aa', 'font-size': '8', 'font-family': 'monospace', 'letter-spacing': '2' }, 'NÚCLEO'));
     var filters = $('memory-filters'); wipe(filters); var allCats = ['all'].concat(cats);
     for (i = 0; i < allCats.length; i++) (function (cat) { var b = el('button', 'filter-button' + (memoryFilter === cat ? ' selected' : ''), cat === 'all' ? 'Todas as conexões' : M.categories[cat]); b.onclick = function () { memoryFilter = cat; renderBrain(); }; filters.appendChild(b); }(allCats[i]));
     var list = $('memory-list'); wipe(list); var items = state.memories.filter(function (m) { return memoryFilter === 'all' || m.category === memoryFilter; });
@@ -130,7 +134,9 @@
     $('sync-local').hidden = !user || !(readJSON(storageKey, empty()).memories || []).length;
     $('compatibility-description').textContent = oldAndroid ? 'Android antigo detectado. Recomendamos o modo econômico. Voz e tela cheia dependem do navegador.' : 'O modo econômico funciona em qualquer aparelho. Os recursos de voz aparecem conforme a compatibilidade do navegador.';
     document.body.className = preferences.low_power ? 'low-power' : '';
-    $('power-shortcut').textContent = preferences.low_power ? '◐ Modo econômico ativo' : '◐ Modo econômico';
+    iconLabel($('power-shortcut'), 'power', preferences.low_power ? 'Modo econômico ativo' : 'Modo econômico');
+    if (window.AguirraVoice) window.AguirraVoice.setServer(voiceServer && !!user);
+    populateVoices();
   }
   function openModal(id) { modalFocus = document.activeElement; $(id).hidden = false; var input = $(id).querySelector('input,textarea'); if (input) input.focus(); }
   function closeModal(id) { $(id).hidden = true; if (modalFocus && modalFocus.focus) modalFocus.focus(); }
@@ -141,22 +147,23 @@
     if (!user) { state.memories = state.memories.filter(function (x) { return x.id !== m.id; }); saveLocal(); render(); return; }
     request('DELETE', '/api/memory?id=' + encodeURIComponent(m.id), null, function (err) { if (err) toast(err.message); else loadData(); });
   }
-  function speak(text) { if (!preferences.voice || !('speechSynthesis' in window) || !window.SpeechSynthesisUtterance) return; window.speechSynthesis.cancel(); var u = new SpeechSynthesisUtterance(text); u.lang = 'pt-BR'; window.speechSynthesis.speak(u); }
+  function speak(text) { if (!preferences.voice) return; var messages = state.messages.filter(function (m) { return m.thread_id === currentThread && m.role === 'assistant'; }); window.AguirraVoice.speak(text, user && messages.length ? messages[messages.length - 1].id : null); }
+  function populateVoices() { if (!window.AguirraVoice) return; var available = window.AguirraVoice.voices(), select = $('setting-voice-name'); wipe(select); var automatic = el('option', '', 'Automática em português'); automatic.value = ''; select.appendChild(automatic); for (var i = 0; i < available.length; i++) { var option = el('option', '', available[i].name + ' (' + available[i].lang + ')'); option.value = available[i].name; select.appendChild(option); } if (voiceServer) { var computer = el('option', '', 'Voz do meu computador (Windows)'); computer.value = '__computer__'; select.appendChild(computer); } select.value = preferences.voice_name || ''; }
   function setupVoice() {
     var Recognition = window.SpeechRecognition || window.webkitSpeechRecognition, buttons = document.querySelectorAll('[data-mic]');
-    for (var i = 0; i < buttons.length; i++) (function (button) { if (!Recognition) { button.hidden = true; return; } button.onclick = function () { var recognition; try { recognition = new Recognition(); recognition.lang = 'pt-BR'; recognition.continuous = false; recognition.interimResults = false; recognition.onstart = function () { button.className = 'mic-button listening'; toast('Ouvindo…'); }; recognition.onend = function () { button.className = 'mic-button'; }; recognition.onerror = function () { button.className = 'mic-button'; toast('O ditado não está disponível agora. Você pode digitar sua mensagem.'); }; recognition.onresult = function (event) { $(button.getAttribute('data-mic')).value = event.results[0][0].transcript; }; recognition.start(); } catch (e) { toast('Este navegador não conseguiu ativar o microfone.'); } }; }(buttons[i]));
+    for (var i = 0; i < buttons.length; i++) (function (button) { if (!Recognition) { button.hidden = true; return; } button.onclick = function () { if (busy) return; var recognition; try { window.AguirraVoice.stop(); recognition = new Recognition(); recognition.lang = 'pt-BR'; recognition.continuous = false; recognition.interimResults = false; recognition.onstart = function () { button.className = 'mic-button listening'; toast('Ouvindo…'); }; recognition.onend = function () { button.className = 'mic-button'; }; recognition.onerror = function () { button.className = 'mic-button'; toast('O ditado não está disponível agora. Você pode digitar sua mensagem.'); }; recognition.onresult = function (event) { var text = event.results[0][0].transcript; $(button.getAttribute('data-mic')).value = text; send(text); }; recognition.start(); } catch (e) { toast('Este navegador não conseguiu ativar o microfone.'); } }; }(buttons[i]));
   }
   var orbTimer = null, orbPhase = 0;
   function drawOrb(phase) {
     var canvas = $('orb'), ctx = canvas.getContext && canvas.getContext('2d'); if (!ctx) return;
     var width = canvas.width, height = canvas.height, cx = width / 2, cy = height / 2 - 5, radius = 94, ring, i;
     ctx.clearRect(0, 0, width, height);
-    var glow = ctx.createRadialGradient(cx, cy, 2, cx, cy, 125); glow.addColorStop(0, 'rgba(227,206,133,.19)'); glow.addColorStop(.5, 'rgba(195,174,105,.025)'); glow.addColorStop(1, 'rgba(195,174,105,0)'); ctx.fillStyle = glow; ctx.fillRect(0, 0, width, height);
-    ctx.strokeStyle = 'rgba(159,157,102,.10)'; ctx.lineWidth = .6;
+    var glow = ctx.createRadialGradient(cx, cy, 2, cx, cy, 125); glow.addColorStop(0, 'rgba(190,150,255,.19)'); glow.addColorStop(.5, 'rgba(165,120,235,.025)'); glow.addColorStop(1, 'rgba(165,120,235,0)'); ctx.fillStyle = glow; ctx.fillRect(0, 0, width, height);
+    ctx.strokeStyle = 'rgba(157,127,204,.10)'; ctx.lineWidth = .6;
     for (ring = 0; ring < 9; ring++) { ctx.beginPath(); for (i = 0; i <= 100; i++) { var angle = i / 100 * Math.PI * 2; var x = radius * Math.cos(angle), y = radius * Math.sin(angle) * Math.sin(ring * .37 + phase * .12); var rot = ring * .37 + phase * .1; var rx = x * Math.cos(rot) - y * Math.sin(rot), ry = x * Math.sin(rot) + y * Math.cos(rot); if (i === 0) ctx.moveTo(cx + rx, cy + ry); else ctx.lineTo(cx + rx, cy + ry); } ctx.stroke(); }
-    for (ring = 0; ring < 4; ring++) { ctx.strokeStyle = ring === 0 ? 'rgba(224,201,128,.60)' : 'rgba(193,179,109,.30)'; ctx.lineWidth = ring === 0 ? 1 : .7; ctx.beginPath(); var rotation = ring * 1.05 + .2; for (i = 0; i <= 110; i++) { var t = i / 110 * 2 * Math.PI; var ex = Math.cos(t) * (radius + 23), ey = Math.sin(t) * (25 + ring * 9); var px = cx + ex * Math.cos(rotation) - ey * Math.sin(rotation), py = cy + ex * Math.sin(rotation) + ey * Math.cos(rotation); if (!i) ctx.moveTo(px, py); else ctx.lineTo(px, py); } ctx.stroke(); var orbit = phase * .3 + ring * 1.7, ox = Math.cos(orbit) * (radius + 23), oy = Math.sin(orbit) * (25 + ring * 9); ctx.fillStyle = '#d8c487'; ctx.beginPath(); ctx.arc(cx + ox * Math.cos(rotation) - oy * Math.sin(rotation), cy + ox * Math.sin(rotation) + oy * Math.cos(rotation), 2, 0, Math.PI * 2); ctx.fill(); }
-    var seed = 47; for (i = 0; i < 76; i++) { seed = (seed * 16807) % 2147483647; var theta = (seed / 2147483647) * Math.PI * 2 + phase * .08; seed = (seed * 16807) % 2147483647; var phi = Math.acos(2 * seed / 2147483647 - 1); var dx = radius * Math.sin(phi) * Math.cos(theta), dy = radius * Math.cos(phi); ctx.fillStyle = 'rgba(210,196,131,' + (.2 + .5 * (Math.sin(theta) + 1) / 2) + ')'; ctx.beginPath(); ctx.arc(cx + dx, cy + dy, i % 6 === 0 ? 1.6 : .7, 0, Math.PI * 2); ctx.fill(); }
-    ctx.fillStyle = '#e5d29c'; ctx.beginPath(); ctx.arc(cx, cy, 3, 0, Math.PI * 2); ctx.fill();
+    for (ring = 0; ring < 4; ring++) { ctx.strokeStyle = ring === 0 ? 'rgba(204,171,255,.60)' : 'rgba(172,135,227,.30)'; ctx.lineWidth = ring === 0 ? 1 : .7; ctx.beginPath(); var rotation = ring * 1.05 + .2; for (i = 0; i <= 110; i++) { var t = i / 110 * 2 * Math.PI; var ex = Math.cos(t) * (radius + 23), ey = Math.sin(t) * (25 + ring * 9); var px = cx + ex * Math.cos(rotation) - ey * Math.sin(rotation), py = cy + ex * Math.sin(rotation) + ey * Math.cos(rotation); if (!i) ctx.moveTo(px, py); else ctx.lineTo(px, py); } ctx.stroke(); var orbit = phase * .3 + ring * 1.7, ox = Math.cos(orbit) * (radius + 23), oy = Math.sin(orbit) * (25 + ring * 9); ctx.fillStyle = '#c1a1ff'; ctx.beginPath(); ctx.arc(cx + ox * Math.cos(rotation) - oy * Math.sin(rotation), cy + ox * Math.sin(rotation) + oy * Math.cos(rotation), 2, 0, Math.PI * 2); ctx.fill(); }
+    var seed = 47; for (i = 0; i < 76; i++) { seed = (seed * 16807) % 2147483647; var theta = (seed / 2147483647) * Math.PI * 2 + phase * .08; seed = (seed * 16807) % 2147483647; var phi = Math.acos(2 * seed / 2147483647 - 1); var dx = radius * Math.sin(phi) * Math.cos(theta), dy = radius * Math.cos(phi); ctx.fillStyle = 'rgba(193,162,247,' + (.2 + .5 * (Math.sin(theta) + 1) / 2) + ')'; ctx.beginPath(); ctx.arc(cx + dx, cy + dy, i % 6 === 0 ? 1.6 : .7, 0, Math.PI * 2); ctx.fill(); }
+    ctx.fillStyle = '#d8bdff'; ctx.beginPath(); ctx.arc(cx, cy, 3, 0, Math.PI * 2); ctx.fill();
   }
   function startOrb() { if (orbTimer) { clearTimeout(orbTimer); orbTimer = null; } drawOrb(orbPhase); if (preferences.low_power || activeView !== 'home' || document.hidden) return; orbPhase += .025; orbTimer = setTimeout(startOrb, 70); }
   function bind() {
@@ -172,9 +179,11 @@
     $('logout-button').onclick = function () { request('POST', '/api/logout', {}, function (err) { if (err) { toast(err.message); return; } user = null; currentThread = null; state = readJSON(storageKey, empty()); closeModal('auth-modal'); render(); setStatus('Neste aparelho'); }); };
     $('memory-form').onsubmit = function (event) { event.preventDefault(); var content = $('memory-content').value.trim(); if (!content) return; if (M.sensitive(content)) { $('memory-feedback').textContent = 'Guarde preferências e objetivos. Credenciais e informações sensíveis não entram no núcleo.'; return; } var m = { category: $('memory-category').value, content: content, key: M.normalize(content).slice(0, 100), origin: 'manual' }; if (!user) { if (editingMemory) { var old = state.memories.filter(function (x) { return x.id === editingMemory; })[0]; if (old) m.key = old.key; } putLocalMemory(m); saveLocal(); render(); closeModal('memory-modal'); toast('Conexão guardada no seu núcleo.'); return; } request('POST', '/api/memory', { id: editingMemory, category: m.category, content: m.content }, function (err) { if (err) { $('memory-feedback').textContent = err.message; return; } closeModal('memory-modal'); loadData(); toast('Memória sincronizada.'); }); };
     $('setting-low-power').onchange = function () { preferences.low_power = this.checked; savePreferences(); renderSettings(); startOrb(); }; $('power-shortcut').onclick = function () { preferences.low_power = !preferences.low_power; savePreferences(); renderSettings(); startOrb(); toast(preferences.low_power ? 'Modo econômico ativado.' : 'Animação ativada.'); };
-    $('setting-voice').onchange = function () { preferences.voice = this.checked; savePreferences(); if (this.checked && !('speechSynthesis' in window)) toast('A leitura por voz não está disponível neste navegador.'); };
+    $('setting-voice').onchange = function () { preferences.voice = this.checked; savePreferences(); if (!this.checked) window.AguirraVoice.stop(); };
+    $('setting-voice-name').onchange = function () { preferences.voice_name = this.value; window.AguirraVoice.setVoice(this.value); savePreferences(); };
+    $('test-voice').onclick = function () { window.AguirraVoice.speak('Olá. Eu sou o Aguirra, seu assistente pessoal. Estou pronto para conversar com você.', null, true); };
     $('setting-memory').onchange = function () { var enabled = this.checked; if (!user) { state.settings.memory_enabled = enabled; saveLocal(); return; } request('POST', '/api/settings', { memory_enabled: enabled }, function (err) { if (err) { $('setting-memory').checked = state.settings.memory_enabled !== false; toast(err.message); } else state.settings.memory_enabled = enabled; }); };
-    $('stop-voice').onclick = function () { if (window.speechSynthesis) window.speechSynthesis.cancel(); };
+    $('stop-voice').onclick = function () { window.AguirraVoice.stop(); };
     $('sync-local').onclick = function () { var local = readJSON(storageKey, empty()); if (!local.memories.length) return; request('POST', '/api/import', { memories: local.memories.map(function (m) { return { category: m.category, content: m.content }; }) }, function (err) { if (err) toast(err.message); else { loadData(); toast('Memórias importadas. O histórico local permanece neste aparelho.'); } }); };
     $('export-data').onclick = function () { var data = JSON.stringify({ format: 'aguirra-export-v1', exported_at: new Date().toISOString(), data: state }, null, 2), url; try { var blob = new Blob([data], { type: 'application/json' }); url = (window.URL || window.webkitURL).createObjectURL(blob); var a = el('a', '', 'Baixar dados'); a.href = url; a.download = 'aguirra-meus-dados.json'; document.body.appendChild(a); a.click(); document.body.removeChild(a); setTimeout(function () { (window.URL || window.webkitURL).revokeObjectURL(url); }, 20000); } catch (e) { var exportWindow = window.open('', '_blank'); if (exportWindow) { exportWindow.document.body.appendChild(exportWindow.document.createElement('pre')).textContent = data; } else toast('Seu navegador bloqueou a exportação. Tente pelo computador.'); } };
     $('clear-data').onclick = function () { if (!window.confirm('Apagar todo o histórico, assuntos e memórias' + (user ? ' da sua conta em todos os aparelhos' : ' deste aparelho') + '? Essa ação não pode ser desfeita.')) return; if (!user) { state = empty(); currentThread = null; saveLocal(); render(); toast('Seu núcleo foi limpo.'); return; } request('DELETE', '/api/data', null, function (err) { if (err) toast(err.message); else { currentThread = null; loadData(); toast('Histórico e núcleo apagados da sua conta.'); } }); };
@@ -184,6 +193,9 @@
   }
   function setStatus(text) { wipe($('connection-status')); $('connection-status').appendChild(el('i')); $('connection-status').appendChild(document.createTextNode(text)); }
   state = readJSON(storageKey, empty()); if (!state.memories || !state.messages || !state.threads || !state.topics || !state.settings) state = empty();
+  window.AguirraVoice.configure({ voice: preferences.voice_name, onStatus: function (text) { $('voice-status').textContent = text; }, onNotice: function (text) { $('voice-status').textContent = text; toast(text); } });
   bind(); setupVoice(); tick(); setInterval(tick, 15000); render(); startOrb();
-  request('GET', '/api/session', null, function (err, data) { if (err) { setStatus('Neste aparelho'); $('server-capabilities').textContent = 'Servidor indisponível. Memória local, mapa e histórico continuam funcionando.'; return; } user = data.user || null; localApi = !!data.local; setStatus(user ? (localApi ? 'Computador conectado' : 'Conta conectada') : 'Neste aparelho'); $('server-capabilities').textContent = (localApi ? 'IA processada no computador com Ollama. ' : 'A conversa com IA é usada pelo endereço local do seu computador. ') + 'Notícias por feeds RSS públicos. Nenhuma API paga é utilizada.'; if (user) loadData(); else render(); });
+  if (window.speechSynthesis) window.speechSynthesis.onvoiceschanged = populateVoices;
+  $('voice-status').textContent = 'Leitura automática ativada. Escolha uma voz ou toque em Testar voz.';
+  request('GET', '/api/session', null, function (err, data) { if (err) { setStatus('Neste aparelho'); $('server-capabilities').textContent = 'Servidor indisponível. Memória local, mapa e histórico continuam funcionando.'; return; } user = data.user || null; localApi = !!data.local; voiceServer = !!data.tts_server; setStatus(user ? (localApi ? 'Computador conectado' : 'Conta conectada') : 'Neste aparelho'); $('server-capabilities').textContent = (localApi ? 'IA processada no computador com Ollama. ' : 'A conversa com IA é usada pelo endereço local do seu computador. ') + 'Notícias por feeds RSS públicos. Nenhuma API paga é utilizada.'; if (user) loadData(); else render(); });
 }());
