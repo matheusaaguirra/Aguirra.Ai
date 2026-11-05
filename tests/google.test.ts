@@ -2,11 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { googleReady, GOOGLE_MODEL, validateAnswer, respondGoogle } from '../agent/lib/google.ts';
 const documents = [{ title: 'RAM', url: 'https://pt.wikipedia.org/wiki/RAM', content: 'Memória de acesso aleatório.' }];
-test('Sources only come from fetched documents; unverified text is identified', () => {
+test('Replies stay clean and source metadata only references fetched documents', () => {
   const result = validateAnswer({ answer: 'RAM é memória de acesso aleatório.', source_ids: [1] }, documents);
+  assert.equal(result.reply, 'RAM é memória de acesso aleatório.');
   assert.equal(result.sources[0].url, documents[0].url); assert.equal(result.mode, 'public_sources');
   assert.throws(() => validateAnswer({ answer: 'Invented reference', source_ids: [2] }, documents));
-  assert.equal(validateAnswer({ answer: 'Olá', source_ids: [] }, []).mode, 'google_ai');
+  const direct = validateAnswer({ answer: 'Olá', source_ids: [] }, []); assert.equal(direct.mode, 'google_ai'); assert.equal(direct.reply, 'Olá');
 });
 test('Free chat uses the supported fixed model without any paid Google Search tool', async () => {
   const originalFetch = globalThis.fetch, saved = { ...process.env }; let calls = 0;

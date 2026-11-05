@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { localMode } from "./local-store.ts";
 
 export function serverVoiceAvailable() { return localMode() && process.platform === "win32"; }
-export function speechText(text: string) { return text.replace(/https?:\/\/\S+/g, "").replace(/[#*_`]/g, "").slice(0, 6000).trim(); }
+export function speechText(text: string) { return text.replace(/^(?:Resposta da IA, sem pesquisa verificada na web\.|Consulta a fontes públicas\.)\s*/i, '').replace(/https?:\/\/\S+/g, "").replace(/[#*_`]/g, "").slice(0, 6000).trim(); }
 // User text is sent via stdin. It is never interpolated into PowerShell code.
 const script = `
 $ErrorActionPreference='Stop'

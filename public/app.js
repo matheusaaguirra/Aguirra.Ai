@@ -27,6 +27,7 @@
     xhr.send(body ? JSON.stringify(body) : null);
   }
   function go(view) {
+    if (view === 'chat') view = 'home';
     var views = document.querySelectorAll('.view'), buttons = document.querySelectorAll('[data-view]'), names = { home: 'Central', chat: 'Conversas', brain: 'Mapa cerebral', history: 'Histórico', settings: 'Configurações' }, i;
     activeView = view;
     for (i = 0; i < views.length; i++) views[i].className = 'view' + (views[i].id === 'view-' + view ? ' active' : '');
@@ -88,7 +89,7 @@
   function send(text) {
     text = String(text || '').trim(); if (!text || busy) return; if (!sessionReady) { toast('Conectando ao Aguirra. Envie novamente em um instante.'); return; }
     if (text.length > 4000) { toast('Sua mensagem deve ter até 4.000 caracteres.'); return; }
-    text = M.redact(text); go('chat'); $('home-input').value = ''; $('chat-input').value = '';
+    text = M.redact(text); window.AguirraVoice.stop(); go('home'); $('last-question').textContent = text; $('voice-hint').hidden = true; document.querySelector('.home-center').className = 'home-center is-conversing'; $('home-input').value = ''; $('chat-input').value = '';
     var hadThread = currentThread, guest = !user;
     ensureThread(text); var pending = addMessage('user', text), payload = { message: text, thread_id: hadThread, request_id: pending.id };
     if (guest) {
@@ -106,20 +107,20 @@
       if (err) {
         addMessage('assistant', err.message, true); toast(err.message);
         if (guest) { saveLocal(); render(); speak(err.message); }
-        else { renderMessages(); if (result && result.thread_id) { currentThread = result.thread_id; loadData(function () { speak(err.message); }); } }
+        else { renderMessages(); if (result && result.thread_id) { currentThread = result.thread_id; loadData(function () { speak(err.message); }); } else speak(err.message); }
         return;
       }
       if (guest) { var reply = addMessage('assistant', result.reply); reply.sources = result.sources || []; reply.search_entry_point = result.search_entry_point || null; reply.mode = result.mode; saveLocal(); render(); speak(result.reply); return; }
       currentThread = result.thread_id; loadData(function () { renderMessages(); if (result.learned) toast('Nova conexão guardada no seu núcleo.'); speak(result.reply); });
     });
   }
-  function setBusy(value) { busy = value; $('chat-submit').disabled = value; $('chat-input').disabled = value; $('chat-activity').textContent = value ? 'Aguirra está conectando as ideias…' : ''; $('orb-state').textContent = value ? 'CONECTANDO IDEIAS' : 'PRONTO PARA OUVIR SUAS IDEIAS'; }
+  function setBusy(value) { busy = value; $('chat-submit').disabled = value; $('chat-input').disabled = value; $('home-submit').disabled = value; $('home-input').disabled = value; if (value) { $('orb-response').hidden = false; $('orb-subtitle').textContent = 'Um instante…'; $('full-response').textContent = ''; wipe($('response-sources')); $('replay-response').disabled = true; $('orb-response').querySelector('details').open = false; } updateOrbState(); $('chat-activity').textContent = value ? 'Aguirra está conectando as ideias…' : ''; }
   function loadData(callback) { request('GET', '/api/data', null, function (err, data) { if (err) { toast(err.message); if (callback) callback(err); return; } state = data; render(); if (callback) callback(); }); }
   function renderHistory() {
     var list = $('history-list'), query = M.normalize($('history-search').value); wipe(list);
     var threads = state.threads.filter(function (t) { return M.normalize(t.title).indexOf(query) !== -1 || state.messages.some(function (m) { return m.thread_id === t.id && M.normalize(m.content).indexOf(query) !== -1; }); });
     if (!threads.length) { list.appendChild(el('div', 'empty-state', query ? 'Nenhuma conversa encontrada para essa busca.' : 'Suas conversas aparecerão aqui. Comece pela Central.')); return; }
-    for (var i = 0; i < threads.length; i++) (function (thread) { var button = el('button', 'history-card'); var total = state.messages.filter(function (m) { return m.thread_id === thread.id; }).length; button.appendChild(el('h3', '', thread.title)); button.appendChild(el('p', '', localDate(thread.created_at) + ' · ' + total + ' mensagens  ↗')); button.onclick = function () { currentThread = thread.id; go('chat'); }; list.appendChild(button); }(threads[i]));
+    for (var i = 0; i < threads.length; i++) (function (thread) { var button = el('button', 'history-card'); var total = state.messages.filter(function (m) { return m.thread_id === thread.id; }).length; button.appendChild(el('h3', '', thread.title)); button.appendChild(el('p', '', localDate(thread.created_at) + ' · ' + total + ' mensagens  ↗')); button.onclick = function () { window.AguirraVoice.stop(); currentThread = thread.id; go('home'); $('orb-response').hidden = true; var replies = state.messages.filter(function (m) { return m.thread_id === currentThread && m.role === 'assistant'; }); if (replies.length) presentResponse(replies[replies.length - 1].content); }; list.appendChild(button); }(threads[i]));
   }
   function svgEl(tag, attrs, content) { var n = document.createElementNS('http://www.w3.org/2000/svg', tag); for (var k in attrs) if (Object.prototype.hasOwnProperty.call(attrs, k)) n.setAttribute(k, attrs[k]); if (content !== undefined) n.textContent = content; return n; }
   function renderBrain() {
@@ -170,31 +171,53 @@
     if (!user) { excludeLocalMemory(m); state.memories = state.memories.filter(function (x) { return x.id !== m.id; }); saveLocal(); render(); return; }
     request('DELETE', '/api/memory?id=' + encodeURIComponent(m.id), null, function (err) { if (err) toast(err.message); else loadData(); });
   }
-  function speak(text) { if (!preferences.voice) return; var messages = state.messages.filter(function (m) { return m.thread_id === currentThread && m.role === 'assistant'; }); window.AguirraVoice.speak(text, user && messages.length ? messages[messages.length - 1].id : null); }
+  var lastReply = '', lastReplyId = null, voiceActive = false, listening = false, orbPulse = 0;
+  function updateOrbState() {
+    var mode = listening ? 'listening' : (busy ? 'thinking' : (voiceActive ? 'speaking' : 'idle'));
+    $('orb-stage').className = 'orb-stage is-' + mode;
+    $('orb-state').textContent = { listening: 'ESTOU OUVINDO', thinking: 'CONECTANDO IDEIAS', speaking: 'AGUIRRA FALANDO', idle: 'PRONTO PARA VOCÊ' }[mode];
+    $('stop-response').hidden = !voiceActive; startOrb();
+  }
+  function presentResponse(text) {
+    lastReply = window.AguirraVoice.cleanText(text);
+    var messages = state.messages.filter(function (m) { return m.thread_id === currentThread; }), response = null, i;
+    for (i = messages.length - 1; i >= 0; i--) { if (!response && messages[i].role === 'assistant') response = messages[i]; if (messages[i].role === 'user') { $('last-question').textContent = messages[i].content; break; } }
+    lastReplyId = user && response ? response.id : null;
+    $('orb-response').hidden = false; $('replay-response').disabled = false;
+    document.querySelector('.home-center').className = 'home-center is-conversing';
+    $('orb-subtitle').textContent = lastReply; $('full-response').textContent = lastReply; $('voice-hint').hidden = true;
+    wipe($('response-sources'));
+    var sources = response && response.sources || [];
+    for (i = 0; i < sources.length; i++) { if (!/^https:\/\//i.test(sources[i].url)) continue; var link = el('a', 'source-link', sources[i].title); link.href = sources[i].url; link.target = '_blank'; link.rel = 'noopener noreferrer'; $('response-sources').appendChild(link); }
+  }
+  function speak(text) { presentResponse(text); if (preferences.voice) window.AguirraVoice.speak(lastReply, lastReplyId); }
+  function freshConversation() { if (busy) { toast('Aguarde a resposta atual.'); return; } window.AguirraVoice.stop(); currentThread = null; lastReply = ''; lastReplyId = null; $('orb-response').hidden = true; document.querySelector('.home-center').className = 'home-center'; go('home'); $('home-input').focus(); }
   function populateVoices() { if (!window.AguirraVoice) return; var available = window.AguirraVoice.voices(), select = $('setting-voice-name'); wipe(select); var automatic = el('option', '', 'Automática em português'); automatic.value = ''; select.appendChild(automatic); for (var i = 0; i < available.length; i++) { var option = el('option', '', available[i].name + ' (' + available[i].lang + ')'); option.value = available[i].name; select.appendChild(option); } if (voiceServer) { var computer = el('option', '', 'Voz do meu computador (Windows)'); computer.value = '__computer__'; select.appendChild(computer); } select.value = preferences.voice_name || ''; }
   function setupVoice() {
     var Recognition = window.SpeechRecognition || window.webkitSpeechRecognition, buttons = document.querySelectorAll('[data-mic]');
-    for (var i = 0; i < buttons.length; i++) (function (button) { if (!Recognition) { button.hidden = true; return; } button.onclick = function () { if (busy) return; var recognition; try { window.AguirraVoice.stop(); recognition = new Recognition(); recognition.lang = 'pt-BR'; recognition.continuous = false; recognition.interimResults = false; recognition.onstart = function () { button.className = 'mic-button listening'; toast('Ouvindo…'); }; recognition.onend = function () { button.className = 'mic-button'; }; recognition.onerror = function () { button.className = 'mic-button'; toast('O ditado não está disponível agora. Você pode digitar sua mensagem.'); }; recognition.onresult = function (event) { var text = event.results[0][0].transcript; $(button.getAttribute('data-mic')).value = text; send(text); }; recognition.start(); } catch (e) { toast('Este navegador não conseguiu ativar o microfone.'); } }; }(buttons[i]));
+    for (var i = 0; i < buttons.length; i++) (function (button) { if (!Recognition) { button.hidden = true; return; } button.onclick = function () { if (busy) return; var recognition; try { window.AguirraVoice.stop(); recognition = new Recognition(); recognition.lang = 'pt-BR'; recognition.continuous = false; recognition.interimResults = false; recognition.onstart = function () { button.className = 'mic-button listening'; listening = true; updateOrbState(); }; recognition.onend = function () { button.className = 'mic-button'; listening = false; updateOrbState(); }; recognition.onerror = function () { button.className = 'mic-button'; listening = false; updateOrbState(); toast('O ditado não está disponível agora. Você pode digitar sua mensagem.'); }; recognition.onresult = function (event) { listening = false; var text = event.results[0][0].transcript; $(button.getAttribute('data-mic')).value = text; send(text); }; recognition.start(); } catch (e) { toast('Este navegador não conseguiu ativar o microfone.'); } }; }(buttons[i]));
   }
   var orbTimer = null, orbPhase = 0;
   function drawOrb(phase) {
     var canvas = $('orb'), ctx = canvas.getContext && canvas.getContext('2d'); if (!ctx) return;
-    var width = canvas.width, height = canvas.height, cx = width / 2, cy = height / 2 - 5, radius = 94, ring, i;
+    var width = canvas.width, height = canvas.height, cx = width / 2, cy = height / 2 - 5, energy = voiceActive ? .65 + orbPulse * .35 : (busy || listening ? .35 : .08), radius = 94 + Math.sin(phase * 2.8) * (2 + energy * 7), ring, i; orbPulse *= .88;
     ctx.clearRect(0, 0, width, height);
-    var glow = ctx.createRadialGradient(cx, cy, 2, cx, cy, 125); glow.addColorStop(0, 'rgba(190,150,255,.19)'); glow.addColorStop(.5, 'rgba(165,120,235,.025)'); glow.addColorStop(1, 'rgba(165,120,235,0)'); ctx.fillStyle = glow; ctx.fillRect(0, 0, width, height);
+    var glow = ctx.createRadialGradient(cx, cy, 2, cx, cy, 125); glow.addColorStop(0, 'rgba(190,150,255,' + (.19 + energy * .22) + ')' ); glow.addColorStop(.5, 'rgba(165,120,235,.025)'); glow.addColorStop(1, 'rgba(165,120,235,0)'); ctx.fillStyle = glow; ctx.fillRect(0, 0, width, height);
     ctx.strokeStyle = 'rgba(157,127,204,.10)'; ctx.lineWidth = .6;
     for (ring = 0; ring < 9; ring++) { ctx.beginPath(); for (i = 0; i <= 100; i++) { var angle = i / 100 * Math.PI * 2; var x = radius * Math.cos(angle), y = radius * Math.sin(angle) * Math.sin(ring * .37 + phase * .12); var rot = ring * .37 + phase * .1; var rx = x * Math.cos(rot) - y * Math.sin(rot), ry = x * Math.sin(rot) + y * Math.cos(rot); if (i === 0) ctx.moveTo(cx + rx, cy + ry); else ctx.lineTo(cx + rx, cy + ry); } ctx.stroke(); }
-    for (ring = 0; ring < 4; ring++) { ctx.strokeStyle = ring === 0 ? 'rgba(204,171,255,.60)' : 'rgba(172,135,227,.30)'; ctx.lineWidth = ring === 0 ? 1 : .7; ctx.beginPath(); var rotation = ring * 1.05 + .2; for (i = 0; i <= 110; i++) { var t = i / 110 * 2 * Math.PI; var ex = Math.cos(t) * (radius + 23), ey = Math.sin(t) * (25 + ring * 9); var px = cx + ex * Math.cos(rotation) - ey * Math.sin(rotation), py = cy + ex * Math.sin(rotation) + ey * Math.cos(rotation); if (!i) ctx.moveTo(px, py); else ctx.lineTo(px, py); } ctx.stroke(); var orbit = phase * .3 + ring * 1.7, ox = Math.cos(orbit) * (radius + 23), oy = Math.sin(orbit) * (25 + ring * 9); ctx.fillStyle = '#c1a1ff'; ctx.beginPath(); ctx.arc(cx + ox * Math.cos(rotation) - oy * Math.sin(rotation), cy + ox * Math.sin(rotation) + oy * Math.cos(rotation), 2, 0, Math.PI * 2); ctx.fill(); }
+    for (ring = 0; ring < 4; ring++) { ctx.strokeStyle = ring === 0 ? 'rgba(204,171,255,.60)' : 'rgba(172,135,227,.30)'; ctx.lineWidth = ring === 0 ? 1 : .7; ctx.beginPath(); var rotation = ring * 1.05 + .2 + phase * (.09 + energy * .12); for (i = 0; i <= 110; i++) { var t = i / 110 * 2 * Math.PI; var ex = Math.cos(t) * (radius + 23), ey = Math.sin(t) * (25 + ring * 9); var px = cx + ex * Math.cos(rotation) - ey * Math.sin(rotation), py = cy + ex * Math.sin(rotation) + ey * Math.cos(rotation); if (!i) ctx.moveTo(px, py); else ctx.lineTo(px, py); } ctx.stroke(); var orbit = phase * .3 + ring * 1.7, ox = Math.cos(orbit) * (radius + 23), oy = Math.sin(orbit) * (25 + ring * 9); ctx.fillStyle = '#c1a1ff'; ctx.beginPath(); ctx.arc(cx + ox * Math.cos(rotation) - oy * Math.sin(rotation), cy + ox * Math.sin(rotation) + oy * Math.cos(rotation), 2, 0, Math.PI * 2); ctx.fill(); }
     var seed = 47; for (i = 0; i < 76; i++) { seed = (seed * 16807) % 2147483647; var theta = (seed / 2147483647) * Math.PI * 2 + phase * .08; seed = (seed * 16807) % 2147483647; var phi = Math.acos(2 * seed / 2147483647 - 1); var dx = radius * Math.sin(phi) * Math.cos(theta), dy = radius * Math.cos(phi); ctx.fillStyle = 'rgba(193,162,247,' + (.2 + .5 * (Math.sin(theta) + 1) / 2) + ')'; ctx.beginPath(); ctx.arc(cx + dx, cy + dy, i % 6 === 0 ? 1.6 : .7, 0, Math.PI * 2); ctx.fill(); }
-    ctx.fillStyle = '#d8bdff'; ctx.beginPath(); ctx.arc(cx, cy, 3, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#d8bdff'; ctx.beginPath(); ctx.arc(cx, cy, 3 + energy * 3, 0, Math.PI * 2); ctx.fill();
   }
-  function startOrb() { if (orbTimer) { clearTimeout(orbTimer); orbTimer = null; } drawOrb(orbPhase); if (preferences.low_power || activeView !== 'home' || document.hidden) return; orbPhase += .025; orbTimer = setTimeout(startOrb, 70); }
+  function startOrb() { if (orbTimer) { clearTimeout(orbTimer); orbTimer = null; } drawOrb(orbPhase); var reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches; if (activeView !== 'home' || document.hidden || reduced || (preferences.low_power && !voiceActive && !busy && !listening)) return; orbPhase += voiceActive ? .065 : (busy ? .05 : .025); orbTimer = setTimeout(startOrb, preferences.low_power ? 140 : 50); }
   function bind() {
     var buttons = document.querySelectorAll('[data-view],[data-open]'), i;
     for (i = 0; i < buttons.length; i++) buttons[i].onclick = function () { go(this.getAttribute('data-view') || this.getAttribute('data-open')); };
     var prompts = document.querySelectorAll('[data-prompt]'); for (i = 0; i < prompts.length; i++) prompts[i].onclick = function () { send(this.getAttribute('data-prompt')); };
     $('home-form').onsubmit = function (event) { event.preventDefault(); send($('home-input').value); }; $('chat-form').onsubmit = function (event) { event.preventDefault(); send($('chat-input').value); };
-    $('new-conversation').onclick = function () { if (busy) { toast('Espere a resposta atual antes de abrir outra conversa.'); return; } currentThread = null; renderMessages(); $('chat-input').focus(); };
+    $('new-conversation').onclick = freshConversation; $('fresh-response').onclick = freshConversation;
+    $('replay-response').onclick = function () { if (lastReply && !busy) { $('voice-hint').hidden = true; window.AguirraVoice.speak(lastReply, lastReplyId); } };
+    $('stop-response').onclick = function () { window.AguirraVoice.stop(); $('orb-subtitle').textContent = lastReply; };
     $('history-search').oninput = renderHistory; $('add-memory').onclick = function () { openMemory(); };
     $('account-button').onclick = openAuth; $('settings-login').onclick = openAuth; $('close-auth').onclick = function () { closeModal('auth-modal'); }; $('close-memory').onclick = function () { closeModal('memory-modal'); };
     $('google-login').onclick = function () { if (!googleLoginReady) return; this.disabled = true; $('google-login-status').textContent = 'Conectando ao Google…'; request('POST', '/api/google', {}, function (err, result) { if (err) { $('google-login').disabled = false; $('google-login-status').textContent = err.message; return; } window.location.href = result.url; }); };
@@ -217,7 +240,12 @@
   }
   function setStatus(text) { wipe($('connection-status')); $('connection-status').appendChild(el('i')); $('connection-status').appendChild(document.createTextNode(text)); }
   state = readJSON(storageKey, empty()); if (!state.memories || !state.messages || !state.threads || !state.topics || !state.settings) state = empty();
-  window.AguirraVoice.configure({ voice: preferences.voice_name, onStatus: function (text) { $('voice-status').textContent = text; }, onNotice: function (text) { $('voice-status').textContent = text; toast(text); } });
+  window.AguirraVoice.configure({ voice: preferences.voice_name,
+    onStatus: function (text) { $('voice-status').textContent = text; },
+    onNotice: function (text) { $('voice-status').textContent = text; $('voice-hint').textContent = text; $('voice-hint').hidden = false; },
+    onState: function (value) { voiceActive = value === 'speaking'; updateOrbState(); if (value !== 'speaking' && lastReply) $('orb-subtitle').textContent = lastReply; },
+    onCaption: function (text) { $('orb-subtitle').textContent = text; }, onPulse: function () { orbPulse = 1; }
+  });
   bind(); setupVoice(); tick(); setInterval(tick, 15000); render(); startOrb();
   if (window.speechSynthesis) window.speechSynthesis.onvoiceschanged = populateVoices;
   if (/[?&]auth=google-failed(?:&|$)/.test(window.location.search)) { toast('Não foi possível concluir a entrada com Google. Tente novamente.'); if (window.history && window.history.replaceState) window.history.replaceState(null, '', '/'); }
