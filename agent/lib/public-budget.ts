@@ -17,5 +17,5 @@ export async function claimPublicBudget(kind: 'guest' | 'google', identity: stri
   const visitor = createHmac('sha256', secret).update(new Date().toISOString().slice(0, 10) + ':' + identity).digest('hex');
   const response = await fetch(`${url}/rest/v1/rpc/aguirra_claim_public_budget`, { method: 'POST', headers: { apikey: key, 'Content-Type': 'application/json' }, body: JSON.stringify({ server_token: secret, budget_kind: kind, visitor_hash: visitor }), signal: AbortSignal.timeout(10000) });
   if (!response.ok) throw new AppError(503, 'A verificação do limite gratuito está indisponível. Tente novamente mais tarde.');
-  if (await response.json() !== true) throw new AppError(429, kind === 'google' ? 'A cota diária de pesquisa do Aguirra terminou. Volte amanhã; nenhuma consulta paga será feita.' : 'Você atingiu o limite de perguntas desta hora. Aguarde antes de continuar.');
+  if (await response.json() !== true) throw new AppError(429, kind === 'google' ? 'A cota diária de respostas com IA do Aguirra terminou. Volte amanhã; nenhuma consulta paga será feita.' : 'Você atingiu o limite de perguntas desta hora. Aguarde antes de continuar.');
 }

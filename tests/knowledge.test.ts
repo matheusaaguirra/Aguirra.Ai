@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { knowledgeQuery, needsCurrent, parseKnowledge } from '../agent/lib/knowledge.ts';
 test('Public retrieval is for explicit factual topics and avoids current or personal statements', () => {
-  assert.equal(knowledgeQuery('O que é memória RAM?'), 'memória RAM');
+  assert.equal(knowledgeQuery('O que é memória RAM? Responda em poucas frases.'), 'memória RAM');
   assert.equal(knowledgeQuery('Prefiro respostas curtas'), null);
   assert.equal(knowledgeQuery('Meu nome é Ana'), null);
   assert.equal(needsCurrent('Quem é o presidente atual?'), true);

@@ -4,7 +4,7 @@ const cache = new Map<string, { expires: number; documents: Document[] }>();
 export function needsCurrent(message: string) { return /\b(hoje|agora|atual|atualmente|cotacao|preco|clima|cambio|dolar|presidente|eleicoes|resultado)\b|ultim[oa]s?\b/.test(normalize(message)); }
 export function knowledgeQuery(message: string) {
   if (!/^(o que (e|sao|significa)|quem (e|foi)|qual (e )?a capital|explique|como funciona)/.test(normalize(message))) return null;
-  return message.replace(/^(o que (é|e|são|sao|significa)|quem (é|e|foi)|qual (é |e )?a |explique( o| a)?|como funciona( o| a)?)/i, '').replace(/[?!]/g, '').trim().slice(0, 160);
+  return message.split(/[?!]/)[0].replace(/^(o que (é|e|são|sao|significa)|quem (é|e|foi)|qual (é |e )?a |explique( o| a)?|como funciona( o| a)?)/i, '').replace(/[?!]/g, '').trim().slice(0, 160);
 }
 export function parseKnowledge(data: any): Document[] {
   return Object.values(data?.query?.pages || {}).flatMap((page: any) => {
@@ -20,7 +20,8 @@ export async function readKnowledge(message: string): Promise<Document[]> {
     const response = await fetch(url, { headers: { 'User-Agent': 'Aguirra/1.0 (https://github.com/matheusaaguirra/Aguirra.Ai)', Accept: 'application/json' }, signal: AbortSignal.timeout(8000) });
     if (!response.ok) return [];
     const raw = await response.text(); if (raw.length > 1000000) return [];
-    const documents = parseKnowledge(JSON.parse(raw));
+    const terms = normalize(query).split(/\W+/).filter(w => w.length > 2 && !['que', 'uma', 'das', 'dos', 'como'].includes(w));
+    const documents = parseKnowledge(JSON.parse(raw)).filter(d => terms.some(w => normalize(d.title).includes(w)));
     if (cache.size > 100) cache.clear(); cache.set(query, { expires: Date.now() + 300000, documents }); return documents;
   } catch { return []; }
 }
