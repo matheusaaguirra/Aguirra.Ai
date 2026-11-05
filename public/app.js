@@ -69,7 +69,7 @@
   function send(text) {
     text = String(text || '').trim(); if (!text || busy || micProcessing) return; if (!sessionReady) { toast('Conectando ao Aguirra. Envie novamente em um instante.'); return; }
     if (text.length > 4000) { toast('Sua mensagem deve ter até 4.000 caracteres.'); return; }
-    text = M.redact(text); window.AguirraVoice.prime(); window.AguirraMicrophone.cancel(); window.AguirraVoice.stop(); go('home'); $('last-question').textContent = text; $('voice-hint').hidden = true; document.querySelector('.home-center').className = 'home-center is-conversing'; $('home-input').value = '';
+    text = M.redact(text); window.AguirraVoice.prime(); window.AguirraMicrophone.cancel(); window.AguirraVoice.stop(); go('home'); $('voice-hint').hidden = true; $('home-input').value = '';
     var guest = !user;
     ensureLog(); var pending = addMessage('user', text), payload = { message: text, request_id: pending.id };
     if (guest) {
@@ -94,7 +94,7 @@
       loadData(function () { if (result.learned) toast('Nova conexão guardada no seu núcleo.'); speak(result.reply); });
     });
   }
-  function setBusy(value) { busy = value; $('home-submit').disabled = value; $('home-input').disabled = value; if (value) { $('orb-response').hidden = false; $('orb-subtitle').textContent = 'Um instante…'; $('full-response').textContent = ''; wipe($('response-sources')); $('replay-response').disabled = true; $('orb-response').querySelector('details').open = false; } updateOrbState(); }
+  function setBusy(value) { busy = value; $('home-submit').disabled = value; $('home-input').disabled = value; if (value) hideCaption(); updateOrbState(); }
   function loadData(callback) { request('GET', '/api/data', null, function (err, data) { if (err) { toast(err.message); if (callback) callback(err); return; } state = data; render(); if (callback) callback(); }); }
   function renderHistory() {
     var list = $('history-list'), query = M.normalize($('history-search').value), found = 0; wipe(list);
@@ -105,7 +105,17 @@
       if (!response) for (var j = i + 1; j < state.messages.length; j++) { if (state.messages[j].thread_id !== question.thread_id) continue; if (state.messages[j].role === 'user') break; if (state.messages[j].role === 'assistant') { response = state.messages[j]; break; } }
       if (query && M.normalize(question.content + ' ' + (response ? response.content : '')).indexOf(query) === -1) continue;
       found++;
-      (function (q, r) { var card = el('button', 'history-card'); card.appendChild(el('span', 'section-label', localDate(q.created_at) + ' · ' + localDate(q.created_at, true))); card.appendChild(el('h3', '', q.content)); card.appendChild(el('p', '', r ? window.AguirraVoice.cleanText(r.content).slice(0, 180) : 'Pergunta registrada.')); card.onclick = function () { if (busy || micProcessing) { toast('Aguarde a resposta atual.'); return; } window.AguirraVoice.stop(); go('home'); $('last-question').textContent = q.content; presentResponse(r ? r.content : 'Esta pergunta foi registrada, mas não tem uma resposta salva.', r, q.content); }; list.appendChild(card); }(question, response));
+      (function (q, r) {
+        var card = el('article', 'history-card'), details = el('details', 'history-record'), summary = el('summary', '');
+        summary.appendChild(el('span', 'section-label', localDate(q.created_at) + ' · ' + localDate(q.created_at, true))); summary.appendChild(el('h3', '', q.content));
+        details.appendChild(summary);
+        var answer = el('div', 'history-answer'); answer.appendChild(el('p', 'history-answer-text', r ? window.AguirraVoice.cleanText(r.content) : 'Esta pergunta foi registrada, mas não tem uma resposta salva.'));
+        var sources = r && r.sources || [], links = el('div', 'sources');
+        for (var k = 0; k < sources.length; k++) { if (!/^https:\/\//i.test(sources[k].url)) continue; var link = el('a', 'source-link', sources[k].title); link.href = sources[k].url; link.target = '_blank'; link.rel = 'noopener noreferrer'; links.appendChild(link); }
+        if (links.childNodes.length) answer.appendChild(links);
+        if (r) { var hear = el('button', 'quiet-button history-listen'); hear.type = 'button'; iconLabel(hear, 'volume', 'Ouvir resposta'); hear.onclick = function () { if (busy || micProcessing) { toast('Aguarde a resposta atual.'); return; } presentResponse(r.content, r); window.AguirraVoice.speak(lastReply, lastReplyId); }; answer.appendChild(hear); }
+        details.appendChild(answer); card.appendChild(details); list.appendChild(card);
+      }(question, response));
     }
     if (!found) list.appendChild(el('div', 'empty-state', query ? 'Nenhuma pergunta encontrada.' : 'Suas perguntas e respostas serão registradas aqui, sem criar conversas.'));
   }
@@ -162,30 +172,27 @@
   function updateOrbState() {
     var mode = listening ? 'listening' : (busy || micProcessing || voiceLoading ? 'thinking' : (voiceActive ? 'speaking' : 'idle'));
     $('orb-stage').className = 'orb-stage is-' + mode;
-    $('orb-state').textContent = { listening: 'ESTOU OUVINDO', thinking: 'CONECTANDO IDEIAS', speaking: 'AGUIRRA FALANDO', idle: 'PRONTO PARA VOCÊ' }[mode];
+    $('assistant-status').textContent = { listening: 'ESTOU OUVINDO', thinking: 'CONECTANDO IDEIAS', speaking: 'AGUIRRA FALANDO', idle: 'PRONTO PARA VOCÊ' }[mode];
     $('stop-response').hidden = !voiceActive && !voiceLoading; startOrb();
   }
-  function presentResponse(text, record, questionText) {
+  function hideCaption() { $('orb-subtitle').hidden = true; $('orb-subtitle').textContent = ''; }
+  function presentResponse(text, record) {
     lastReply = window.AguirraVoice.cleanText(text);
-    var messages = state.messages, response = record || null, i;
-    for (i = messages.length - 1; i >= 0; i--) { if (!response && !questionText && messages[i].role === 'assistant') response = messages[i]; if (messages[i].role === 'user') { $('last-question').textContent = questionText || messages[i].content; break; } }
+    var response = record || null;
+    if (!response) for (var i = state.messages.length - 1; i >= 0; i--) if (state.messages[i].role === 'assistant') { response = state.messages[i]; break; }
     lastReplyId = user && response ? response.id : null;
-    $('orb-response').hidden = false; $('replay-response').disabled = false;
-    document.querySelector('.home-center').className = 'home-center is-conversing';
-    $('orb-subtitle').textContent = lastReply; $('full-response').textContent = lastReply; $('voice-hint').hidden = true;
-    wipe($('response-sources'));
-    var sources = response && response.sources || [];
-    for (i = 0; i < sources.length; i++) { if (!/^https:\/\//i.test(sources[i].url)) continue; var link = el('a', 'source-link', sources[i].title); link.href = sources[i].url; link.target = '_blank'; link.rel = 'noopener noreferrer'; $('response-sources').appendChild(link); }
+    hideCaption(); $('voice-hint').hidden = true;
+    if (!preferences.voice) { $('voice-hint').textContent = 'Resposta salva no Histórico.'; $('voice-hint').hidden = false; }
   }
   function speak(text) { presentResponse(text); if (preferences.voice) window.AguirraVoice.speak(lastReply, lastReplyId); }
   function populateVoices() { if (!window.AguirraVoice) return; var available = window.AguirraVoice.voices(), select = $('setting-voice-name'); wipe(select); var automatic = el('option', '', elevenReady ? 'ElevenLabs · voz natural' : 'ElevenLabs · aguardando configuração'); automatic.value = '__elevenlabs__'; select.appendChild(automatic); var browserVoice = el('option', '', 'Voz automática do aparelho'); browserVoice.value = ''; select.appendChild(browserVoice); for (var i = 0; i < available.length; i++) { var option = el('option', '', available[i].name + ' (' + available[i].lang + ')'); option.value = available[i].name; select.appendChild(option); } if (voiceServer) { var computer = el('option', '', 'Voz do meu computador (Windows)'); computer.value = '__computer__'; select.appendChild(computer); } select.value = preferences.voice_name || ''; }
   function setupVoice() {
     window.AguirraMicrophone.configure({
-      onState: function (value) { listening = value === 'listening' || value === 'requesting'; micProcessing = value === 'transcribing'; var button = document.querySelector('[data-mic]'); button.className = 'mic-button' + (listening ? ' listening' : ''); button.setAttribute('aria-pressed', listening ? 'true' : 'false'); button.setAttribute('aria-label', listening ? 'Concluir pergunta por voz' : 'Falar com o Aguirra'); $('cancel-microphone').hidden = !listening && !micProcessing; $('microphone-status').textContent = { requesting: 'Aguardando a permissão do microfone…', listening: 'Estou ouvindo. Toque no microfone para concluir.', transcribing: 'Transformando sua fala em texto…', idle: 'Toque no microfone para falar. Toque novamente para concluir.' }[value]; $('home-submit').disabled = busy || micProcessing; $('home-input').disabled = busy || micProcessing; updateOrbState(); },
-      onText: function (text) { $('home-input').value = text; }, onNotice: function (text) { $('microphone-status').textContent = text; },
+      onState: function (value) { listening = value === 'listening' || value === 'requesting'; micProcessing = value === 'transcribing'; var button = document.querySelector('[data-mic]'); button.className = 'mic-button' + (listening ? ' listening' : ''); button.setAttribute('aria-pressed', listening ? 'true' : 'false'); button.setAttribute('aria-label', listening ? 'Concluir pergunta por voz' : 'Falar com o Aguirra'); $('cancel-microphone').hidden = !listening && !micProcessing; $('microphone-status').hidden = value === 'idle'; $('microphone-status').textContent = { requesting: 'Aguardando a permissão do microfone…', listening: 'Estou ouvindo. Toque no microfone para concluir.', transcribing: 'Transformando sua fala em texto…', idle: 'Toque no microfone para falar. Toque novamente para concluir.' }[value]; $('home-submit').disabled = busy || micProcessing; $('home-input').disabled = busy || micProcessing; updateOrbState(); },
+      onText: function (text) { $('home-input').value = text; }, onNotice: function (text) { $('microphone-status').textContent = text; $('microphone-status').hidden = false; },
       onResult: function (text) { $('home-input').value = text; send(text); }, transcribe: function (audio, callback) { request('POST', '/api/transcribe', { audio: audio }, callback); }
     });
-    document.querySelector('[data-mic]').onclick = function () { if (busy || micProcessing) return; if (!sessionReady) { $('microphone-status').textContent = 'Conectando ao Aguirra. Tente novamente em um instante.'; return; } window.AguirraVoice.stop(); window.AguirraMicrophone.toggle(); };
+    document.querySelector('[data-mic]').onclick = function () { if (busy || micProcessing) return; if (!sessionReady) { $('microphone-status').hidden = false; $('microphone-status').textContent = 'Conectando ao Aguirra. Tente novamente em um instante.'; return; } window.AguirraVoice.stop(); window.AguirraMicrophone.toggle(); };
     $('cancel-microphone').onclick = function () { window.AguirraMicrophone.cancel(); };
   }
   var orbTimer = null, orbPhase = 0, waveHeights = [];
@@ -206,14 +213,13 @@
     for (i = 0; i < buttons.length; i++) buttons[i].onclick = function () { go(this.getAttribute('data-view') || this.getAttribute('data-open')); };
     var prompts = document.querySelectorAll('[data-prompt]'); for (i = 0; i < prompts.length; i++) prompts[i].onclick = function () { send(this.getAttribute('data-prompt')); };
     $('home-form').onsubmit = function (event) { event.preventDefault(); send($('home-input').value); };
-    $('replay-response').onclick = function () { if (lastReply && !busy) { $('voice-hint').hidden = true; window.AguirraVoice.speak(lastReply, lastReplyId); } };
-    $('stop-response').onclick = function () { window.AguirraVoice.stop(); $('orb-subtitle').textContent = lastReply; };
+    $('stop-response').onclick = function () { window.AguirraVoice.stop(); };
     $('history-search').oninput = renderHistory; $('add-memory').onclick = function () { openMemory(); };
     $('account-button').onclick = openAuth; $('settings-login').onclick = openAuth; $('close-auth').onclick = function () { closeModal('auth-modal'); }; $('close-memory').onclick = function () { closeModal('memory-modal'); };
     $('google-login').onclick = function () { if (!googleLoginReady) return; this.disabled = true; $('google-login-status').textContent = 'Conectando ao Google…'; request('POST', '/api/google', {}, function (err, result) { if (err) { $('google-login').disabled = false; $('google-login-status').textContent = err.message; return; } window.location.href = result.url; }); };
     $('toggle-auth').onclick = function () { authMode = authMode === 'login' ? 'register' : 'login'; $('auth-title').textContent = authMode === 'login' ? 'Entre no seu espaço.' : 'Crie seu espaço pessoal.'; $('auth-submit').textContent = authMode === 'login' ? 'Entrar' : 'Criar conta'; $('toggle-auth').textContent = authMode === 'login' ? 'Ainda não tenho conta ↗' : 'Já tenho uma conta ↗'; $('auth-feedback').textContent = ''; };
-    $('auth-form').onsubmit = function (event) { event.preventDefault(); $('auth-submit').disabled = true; $('auth-feedback').textContent = 'Conectando…'; request('POST', '/api/auth', { mode: authMode, email: $('auth-email').value, password: $('auth-password').value }, function (err, data) { $('auth-submit').disabled = false; $('auth-password').value = ''; if (err) { $('auth-feedback').textContent = err.message; return; } if (!data.user) { $('auth-feedback').textContent = data.message || 'Confira seu e-mail para confirmar a conta e depois entre aqui.'; return; } user = data.user; window.AguirraVoice.stop(); window.AguirraVoice.clearCache(); $('orb-response').hidden = true; closeModal('auth-modal'); loadData(); setStatus('Conta conectada'); toast('Seu espaço está conectado.'); }); };
-    $('logout-button').onclick = function () { request('POST', '/api/logout', {}, function (err) { if (err) { toast(err.message); return; } user = null; window.AguirraVoice.stop(); window.AguirraVoice.clearCache(); $('orb-response').hidden = true; state = readJSON(storageKey, empty()); closeModal('auth-modal'); render(); setStatus('Neste aparelho'); }); };
+    $('auth-form').onsubmit = function (event) { event.preventDefault(); $('auth-submit').disabled = true; $('auth-feedback').textContent = 'Conectando…'; request('POST', '/api/auth', { mode: authMode, email: $('auth-email').value, password: $('auth-password').value }, function (err, data) { $('auth-submit').disabled = false; $('auth-password').value = ''; if (err) { $('auth-feedback').textContent = err.message; return; } if (!data.user) { $('auth-feedback').textContent = data.message || 'Confira seu e-mail para confirmar a conta e depois entre aqui.'; return; } user = data.user; window.AguirraVoice.stop(); window.AguirraVoice.clearCache(); hideCaption(); closeModal('auth-modal'); loadData(); setStatus('Conta conectada'); toast('Seu espaço está conectado.'); }); };
+    $('logout-button').onclick = function () { request('POST', '/api/logout', {}, function (err) { if (err) { toast(err.message); return; } user = null; window.AguirraVoice.stop(); window.AguirraVoice.clearCache(); hideCaption(); state = readJSON(storageKey, empty()); closeModal('auth-modal'); render(); setStatus('Neste aparelho'); }); };
     $('memory-form').onsubmit = function (event) { event.preventDefault(); var content = $('memory-content').value.trim(); if (!content) return; if (M.sensitive(content)) { $('memory-feedback').textContent = 'Guarde preferências e objetivos. Credenciais e informações sensíveis não entram no núcleo.'; return; } var m = { category: $('memory-category').value, content: content, key: M.normalize(content).slice(0, 100), origin: 'manual' }; if (!user) { if (editingMemory) { var old = state.memories.filter(function (x) { return x.id === editingMemory; })[0]; if (old) m.key = old.key; } putLocalMemory(m); saveLocal(); render(); closeModal('memory-modal'); toast('Conexão guardada no seu núcleo.'); return; } request('POST', '/api/memory', { id: editingMemory, category: m.category, content: m.content }, function (err) { if (err) { $('memory-feedback').textContent = err.message; return; } closeModal('memory-modal'); loadData(); toast('Memória sincronizada.'); }); };
     $('setting-low-power').onchange = function () { preferences.low_power = this.checked; savePreferences(); renderSettings(); startOrb(); }; $('power-shortcut').onclick = function () { preferences.low_power = !preferences.low_power; savePreferences(); renderSettings(); startOrb(); toast(preferences.low_power ? 'Modo econômico ativado.' : 'Animação ativada.'); };
     $('setting-voice').onchange = function () { preferences.voice = this.checked; savePreferences(); if (!this.checked) window.AguirraVoice.stop(); };
@@ -232,9 +238,9 @@
   state = readJSON(storageKey, empty()); if (!state.memories || !state.messages || !state.threads || !state.topics || !state.settings) state = empty();
   window.AguirraVoice.configure({ voice: preferences.voice_name,
     onStatus: function (text) { $('voice-status').textContent = text; },
-    onNotice: function (text) { $('voice-status').textContent = text; $('voice-hint').textContent = text; $('voice-hint').hidden = false; },
-    onState: function (value) { voiceActive = value === 'speaking'; voiceLoading = value === 'loading'; updateOrbState(); if (value !== 'speaking' && value !== 'loading' && lastReply) $('orb-subtitle').textContent = lastReply; },
-    onCaption: function (text) { $('orb-subtitle').textContent = text; }, onPulse: function () { orbPulse = 1; }
+    onNotice: function (text) { $('voice-status').textContent = text; $('voice-hint').textContent = text + (lastReply ? ' A resposta está no Histórico.' : ''); $('voice-hint').hidden = false; },
+    onState: function (value) { voiceActive = value === 'speaking'; voiceLoading = value === 'loading'; updateOrbState(); if (!voiceActive) hideCaption(); },
+    onCaption: function (text) { if (voiceActive) { $('orb-subtitle').textContent = text; $('orb-subtitle').hidden = false; } }, onPulse: function () { orbPulse = 1; }
   });
   bind(); setupVoice(); tick(); setInterval(tick, 15000); render(); startOrb();
   if (window.speechSynthesis) window.speechSynthesis.onvoiceschanged = populateVoices;

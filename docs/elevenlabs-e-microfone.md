@@ -28,7 +28,7 @@ ElevenLabs foi ativado em produção em 05/11/2026. A chave exclusiva do Aguirra
 
 As órbitas foram substituídas por barras de áudio com transição gradual, brilho discreto e movimento simétrico. No áudio ElevenLabs, um analisador Web Audio lê o sinal reproduzido. Na captura alternativa, lê o microfone. Se a API não fornecer o sinal, a animação usa uma variação visual suave ligada ao estado de fala, sem afirmar que mede o volume real. Modo econômico e movimento reduzido são respeitados.
 
-As legendas ElevenLabs usam o alinhamento temporal retornado pelo serviço. A reprodução usa MP3 por Blob, permitido explicitamente pela política de mídia da página. A chave fica somente no servidor.
+As legendas ElevenLabs usam o alinhamento temporal retornado pelo serviço. Na Central, aparecem discretamente junto ao campo de entrada apenas durante a fala e somem ao terminar ou interromper o áudio. A pergunta repetida, o status visual de repouso e os controles de resposta foram retirados do centro. O Histórico permite expandir cada pergunta para ler a resposta completa, consultar fontes e ouvir novamente sem mudar de tela. A reprodução usa MP3 por Blob, permitido explicitamente pela política de mídia da página. A chave fica somente no servidor.
 
 ## Validação
 
