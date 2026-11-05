@@ -16,6 +16,8 @@ const question = await request('/api/chat', payload('O que é memória RAM?'));
 if (session.data.google_ready) { assert.equal(question.status, 200); assert.ok(['public_sources', 'google_ai'].includes(question.data.mode)); assert.match(question.data.reply, /RAM|memória/i); }
 else { assert.equal(question.status, 503); assert.match(question.data.error, /conversa gratuita/); }
 assert.equal((await request('/api/data')).status, 401);
+if (session.data.google_login === false) { const login = await request('/api/google', {}); assert.equal(login.status, 503); assert.match(login.data.error, /aguarda ativação/); }
+const callback = await fetch(origin + '/api/google-callback?code=fixture-code', { redirect: 'manual' }); assert.equal(callback.status, 303); assert.ok(!callback.headers.getSetCookie().some(c => c.startsWith('aguirra_access=')));
 assert.equal((await request('/api/chat', payload('Olá'), 'https://other.example')).status, 403);
 assert.equal((await request('/api/chat', payload('x'.repeat(4001)))).status, 400);
 console.log(JSON.stringify({ guest_chat: 'passed', memory_context: 'passed', live_news_sources: news.data.sources.length, account_data_protected: true, cross_origin_rejected: true, input_limit_enforced: true, google: session.data.google_ready ? 'free_chat_live_verified' : 'pending_owner_free_key' }, null, 2));

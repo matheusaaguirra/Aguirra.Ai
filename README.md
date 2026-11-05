@@ -99,3 +99,7 @@ Feito por **Matheus Aguirra**.
 `node scripts/smoke-guest.mjs` verifica o chat anônimo, núcleo enviado pelo navegador, notícias reais com fontes, proteção de dados de contas, validação de origem e limite de tamanho. A verificação em 05/11/2026 passou com fontes RSS reais; Google permanece pendente da chave gratuita do proprietário. Os 21 testes automatizados e a checagem ES5 também passaram.
 
 ![Conversa sem conta, com memória neste navegador](docs/aguirra-guest-preview.jpg)
+
+### Atualização de 05/11/2026
+
+Conversa gratuita com Gemini 3.5 Flash-Lite e alternativa explícita Gemini 3.1 Flash-Lite em indisponibilidade temporária. Google Search pago não é chamado. Fontes vêm de Wikipedia e RSS; respostas sem verificação são identificadas. O botão de entrada Google foi implementado, mas a ativação do provedor exige credenciais OAuth próprias no Supabase, conforme o [guia](docs/login-google.md). Veja o [relatório de adaptação](docs/relatorio-adaptacao-2026-11-05.md). São 24 testes automatizados aprovados, além da validação de tipos e ES5.

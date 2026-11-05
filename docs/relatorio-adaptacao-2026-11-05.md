@@ -24,6 +24,8 @@ A chave do proprietário foi cadastrada corretamente. O teste real retornou HTTP
 
 A chave continua armazenada como segredo na Vercel e não foi incluída no código nem no relatório. A nova variável AGUIRRA_GOOGLE_FREE_CHAT=confirmed-no-billing libera exclusivamente a geração de texto. A variável antiga da integração incompatível permanece desativada.
 
+O Google apresentou HTTP 503 por alta demanda durante a validação. Isso motivou a alternativa gratuita e não resultou em ativação de faturamento. Os dois modelos podem ficar temporariamente indisponíveis; não há garantia de serviço gratuito contínuo.
+
 O limite global é de 100 tentativas de geração/dia para o projeto inteiro. Visitantes têm até 30 pedidos ao servidor/hora por identificador protegido de rede. Há limite de tokens e tempo; a aplicação não repete automaticamente a chamada no mesmo modelo. A alternativa gratuita, quando aplicável, também consome a cota global. As cotas do Google podem ser menores.
 
 A proteção principal contra cobrança é manter o projeto Google sem conta de faturamento. O aplicativo não consegue verificar essa configuração apenas pela chave. Os planos Vercel Hobby e Supabase Free também têm suas próprias cotas. Nenhum plano ou recurso pago foi contratado nesta adaptação.
@@ -35,7 +37,7 @@ A proteção principal contra cobrança é manter o projeto Google sem conta de 
 - Os três scripts do navegador passaram na checagem de sintaxe ES5.
 - A consulta pública de conhecimento sobre RAM retornou o artigo “Memória de acesso aleatório”, após a correção da relevância.
 - O primeiro teste real do modelo novo retornou HTTP 200 sem autenticação. A verificação revelou um desvio de assunto, corrigido antes da entrega.
-- Verificação final em produção: EM ANDAMENTO.
+- Verificação final de geração em produção: HTTP 200, sem conta, com explicação de RAM e duas fontes reais: “Memória de acesso aleatório” e “Memória do computador”. O retorno diferencia consulta a fontes de resposta não verificada.
 
 ## Limites que permanecem
 
@@ -54,3 +56,5 @@ A memória é recuperação de contexto, não treinamento dos pesos do modelo. O
 Foi adicionado Continuar com Google ao modal de acesso. O fluxo usa Supabase Auth e PKCE S256 no servidor, com verificador e sessão em cookies HttpOnly e Secure. Não é exigida conta para fazer perguntas. Os testes cobrem a troca de código, cookie, origem e callback sem verificador.
 
 **Pendente externo:** o provedor Google está desativado no Supabase e não possui credenciais OAuth fornecidas. O botão mostra esse estado, sem simular login funcional. A chave do Gemini não substitui o Client ID e Client Secret do OAuth. O [guia de ativação](login-google.md) lista os valores exatos a cadastrar no Google e Supabase. Não foi concluído um login real com Google.
+
+![Tela de entrada publicada; provedor Google ainda pendente](aguirra-google-login-preview.jpg)
