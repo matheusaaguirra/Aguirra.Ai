@@ -25,7 +25,8 @@ Assistente pessoal web com conversas, pesquisa e um núcleo de memória que voc�
 - Criação, edição, exclusão, importação de memórias locais e exportação JSON dos dados carregados.
 - Conta e sincronização na nuvem pelo Supabase, com isolamento por usuário.
 - IA local no computador com Ollama; nenhum endpoint de modelo pago.
-- Manchetes por feeds RSS públicos gratuitos e ferramenta de data/hora.
+- Perguntas sem conta, contexto por navegador e ferramenta de data/hora.
+- Pesquisa opcional com Google e fontes verificáveis; manchetes RSS enquanto a chave não é configurada.
 - Interface em tons roxos, ícones vetoriais e marca provisória em quadrado vazio.
 - Voz sintética automática em português, seletor de voz e botão Ouvir resposta. O Windows local pode gerar áudio WAV para navegadores antigos, sem API paga.
 - Modo econômico e tela cheia quando suportados pelo navegador.
@@ -55,11 +56,11 @@ npm run local
 
 **O PC precisa ficar ligado.** O tablet apresenta a interface; o modelo e o SQLite ficam no computador. Nenhuma chave de IA ou cartão é necessário. O download inicial do modelo tem aproximadamente 2,5 GB.
 
-O [guia sem custo](docs/sem-custo.md) explica instalação, rede, código de acesso e limites. Os endpoints externos e modelos cloud estão bloqueados. Não há fallback para uma API paga.
+O [guia sem custo](docs/sem-custo.md) explica instalação, rede, código de acesso e limites. O Ollama permanece restrito ao computador. A integração opcional com Google Search usa um projeto gratuito sem faturamento, conforme o [guia de ativação](docs/google-gratuito.md). Não há fallback para uma API paga.
 
 ### Hospedagem online opcional
 
-A versão online oferece interface, memória, histórico e manchetes RSS. A sincronização usa o Supabase Free e a hospedagem Vercel Hobby, respeitando suas cotas. A geração de IA fica desativada na hospedagem. O aplicativo não faz upgrade automático de planos.
+A versão online aceita perguntas sem conta, com histórico e núcleo separados por navegador, além de manchetes RSS. A pesquisa do Google está integrada e aguarda a chave gratuita do proprietário; veja [como ativar](docs/google-gratuito.md). A sincronização usa o Supabase Free e a hospedagem Vercel Hobby, respeitando suas cotas. Sem a chave e a confirmação do plano Google gratuito, a geração de IA fica desativada na hospedagem. O aplicativo não faz upgrade automático de planos.
 
 Para reproduzir a sincronização, use um projeto Supabase dedicado e aplique [database/schema.sql](database/schema.sql). A aplicação usa apenas a chave publicável e o token do usuário, preservando RLS; não utiliza chave administrativa. Configure o Site URL de Auth para a origem publicada.
 

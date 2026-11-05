@@ -19,6 +19,7 @@
     "test:legacy": "node scripts/check-legacy.mjs"
   },
   "dependencies": {
+    "@ai-sdk/google": "4.0.111",
     "@ai-sdk/openai-compatible": "3.0.84",
     "@vercel/connect": "2.7.0",
     "ai": "7.0.162",

@@ -24,7 +24,7 @@ export async function getSession(request: Request, optional = false): Promise<Se
   if (token) { try { const user = await authFetch("user", undefined, token); return { user, token, cookies: [] }; } catch (err) { if (!(err instanceof AppError) || err.status !== 401) throw err; } }
   if (refresh) { try { const data = await authFetch("token?grant_type=refresh_token", { refresh_token: refresh }); return { user: data.user, token: data.access_token, cookies: sessionCookies(data, request) }; } catch (err) { if (!(err instanceof AppError) || err.status !== 401) throw err; } }
   if (optional) return null;
-  throw new AppError(401, "Entre na sua conta para conversar com a IA e acessar sua memória na nuvem.");
+  throw new AppError(401, "Entre na sua conta para acessar sua memória sincronizada. As perguntas também funcionam sem conta.");
 }
 export async function db<T = any[]>(session: Session, path: string, method = "GET", body?: unknown, prefer = "return=representation"): Promise<T> {
   if (localMode()) { try { return localDb(path, method, body) as T; } catch (error) { throw new AppError((error as any).status || 503, "Não consegui concluir a operação no banco local."); } }

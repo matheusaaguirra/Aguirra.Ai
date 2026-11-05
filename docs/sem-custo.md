@@ -52,7 +52,7 @@ O Ollama precisa estar aberto. **O computador precisa permanecer ligado** para o
 
 ## O que a versão online faz
 
-A interface publicada pode guardar memórias no navegador, ou sincronizar a conta nos planos gratuitos já configurados. Ela fornece histórico, mapa e manchetes RSS. **Não executa a IA local do seu computador pela internet.** A conversa completa é acessada pelo endereço local exibido no terminal.
+A interface publicada pode guardar memórias no navegador, ou sincronizar a conta nos planos gratuitos já configurados. Ela fornece histórico, mapa e manchetes RSS. **Não executa a IA local do seu computador pela internet.** A conversa local é acessada pelo endereço exibido no terminal. A pesquisa online com Google foi preparada para visitantes sem conta, mas aguarda uma chave gratuita do proprietário; consulte o [guia de ativação](google-gratuito.md).
 
 Vercel Hobby e Supabase Free têm cotas; não foi ativado plano pago nem overage automático neste projeto. Se as cotas gratuitas acabarem, o serviço pode limitar/pausar. Não há contratação automática de capacidade paga pelo aplicativo.
 
@@ -71,3 +71,5 @@ O navegador e a voz instalada no Android 4.4 ainda precisam ser testados no apar
 ## Situação da verificação
 
 O código, a memória, o login local, a persistência SQLite, a sintaxe ES5, o isolamento na nuvem e o protocolo de conexão ao modelo são verificados por testes. O protocolo de IA é testado com um servidor local de teste, sem chamada paga. A inferência real com Ollama e a compatibilidade no tablet precisam ser verificadas no computador e no aparelho do usuário.
+
+A opção Google exige um projeto sem faturamento e adesão explícita à cota gratuita. Há limite global de 100 pesquisas/dia na hospedagem, sem fallback pago. A conta do Aguirra é opcional para perguntar; ela serve para sincronizar o núcleo.
