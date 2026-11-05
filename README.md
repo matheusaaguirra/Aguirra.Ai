@@ -93,3 +93,9 @@ Limitações atuais, incluindo paginação e consolidação de preferências con
 ---
 
 Feito por **Matheus Aguirra**.
+
+### Verificação pública sem conta
+
+`node scripts/smoke-guest.mjs` verifica o chat anônimo, núcleo enviado pelo navegador, notícias reais com fontes, proteção de dados de contas, validação de origem e limite de tamanho. A verificação em 05/11/2026 passou com fontes RSS reais; Google permanece pendente da chave gratuita do proprietário. Os 21 testes automatizados e a checagem ES5 também passaram.
+
+![Conversa sem conta, com memória neste navegador](docs/aguirra-guest-preview.jpg)

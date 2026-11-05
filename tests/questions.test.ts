@@ -22,7 +22,7 @@ test('News about a specific topic never silently becomes unrelated regional head
   const items = [{ title: 'Nova fábrica de carros no Brasil', description: 'Indústria automotiva', source: 'BBC', url: 'https://www.bbc.com/1', published_at: null }, { title: 'Mudanças no futebol', description: 'Campeonato brasileiro', source: 'BBC', url: 'https://www.bbc.com/2', published_at: null }] as NewsItem[];
   assert.equal(selectArticles(items, 'Notícias sobre carros no Brasil').length, 1);
   assert.equal(selectArticles(items, 'Notícias de astronomia no Brasil').length, 0);
-  assert.equal(selectArticles(items, 'O que está acontecendo no Brasil?').length, 2);
+  assert.equal(selectArticles(items.concat([{ ...items[0], title: 'Voos desviados na Europa', description: 'Aeroportos europeus' }]), 'O que está acontecendo no Brasil?').length, 2);
 });
 test('Guest basic answers do not need a model or claim Google research', async () => {
   const response = await answerQuestion('Olá', { history: [], memories: [] });

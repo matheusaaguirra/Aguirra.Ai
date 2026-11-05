@@ -11,11 +11,14 @@ const cache = new Map<string, { expires: number; items: NewsItem[] }>();
 function clean(value: unknown) { return String(value || "").replace(/<[^>]*>/g, "").replace(/\s+/g, " ").trim(); }
 export function parseFeed(xml: string, source = "BBC News"): NewsItem[] {
   if (xml.length > 1_500_000 || /<!DOCTYPE|<!ENTITY/i.test(xml)) throw new Error("Feed inválido.");
-  const parsed = new XMLParser({ ignoreAttributes: true, processEntities: false, parseTagValue: false }).parse(xml);
+  const parsed = new XMLParser({ ignoreAttributes: true, processEntities: true, parseTagValue: false }).parse(xml);
   const raw = parsed?.rss?.channel?.item || []; const items = Array.isArray(raw) ? raw : [raw];
   return items.map((item: any) => ({ title: clean(item.title).slice(0, 200), url: clean(item.link), description: clean(item.description).slice(0, 450), published_at: Number.isNaN(Date.parse(item.pubDate || "")) ? null : new Date(item.pubDate).toISOString(), source })).filter((item: NewsItem) => { try { const url = new URL(item.url); return url.protocol === "https:" && (url.hostname === "bbc.com" || url.hostname.endsWith(".bbc.com") || url.hostname === "bbc.co.uk" || url.hostname.endsWith(".bbc.co.uk")); } catch { return false; } });
 }
 export function selectArticles(items: NewsItem[], query: string): NewsItem[] {
+  const queryText = normalize(query);
+  if (/brasil|brazil/.test(queryText)) items = items.filter(item => /brasil|brazil/.test(normalize(item.title + ' ' + item.description)));
+  if (/estados unidos|\beua\b|united states/.test(queryText)) items = items.filter(item => /\b(?:us|usa|united states|estados unidos|eua|american|trump|washington|congress|white house|senate|new york|florida|california|texas)\b/.test(normalize(item.title + ' ' + item.description)));
   const stop = new Set('o a os as que e esta ta acontecendo acontece no na nos nas em de do da dos das para por um uma quais qual sao ultimas ultima noticias noticia manchetes manchete sobre com hoje agora recentes recente me mostre traga quero saber brasil brazil estados unidos eua mundo america tecnologia'.split(' '));
   const words = normalize(query).split(/\W+/).filter(w => w.length > 2 && !stop.has(w)).map(w => w.length > 4 && w.endsWith('s') ? w.slice(0, -1) : w);
   if (!words.length) return items.slice(0, 6);
