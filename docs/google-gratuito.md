@@ -1,42 +1,38 @@
-# Perguntas sem conta e pesquisa do Google
+# Conversa gratuita do Aguirra — atualização de 05/11/2026
 
-Acesse https://aguirra-ai.vercel.app/. A conta é opcional: o navegador guarda o histórico e o núcleo do visitante. Apenas o contexto recente e as memórias relevantes são enviados para produzir a resposta. Não há leitura de dados de outras contas. Uma conta permite sincronização, mas não é requisito para perguntar.
+O teste real no projeto retornou 404 para Gemini 2.5 Flash-Lite: o Google não libera mais esse modelo a novos usuários. O aplicativo foi adaptado para `gemini-3.5-flash-lite`, com entrada e saída de texto disponíveis no Free Tier.
 
-## Ativar a pesquisa real
+A pesquisa integrada Google Search **não** está disponível no Free Tier desse modelo. O aplicativo não chama essa ferramenta nem ativa recursos pagos. Notícias vêm de RSS BBC e consultas enciclopédicas explícitas usam a API pública da Wikipedia. Isso não é uma busca completa do Google nem de toda a web.
 
-O código está integrado ao Gemini com Google Search grounding. A ativação depende de uma chave do proprietário do projeto. Não é a conta de quem faz a pergunta e não é uma assinatura do ChatGPT.
+## Configuração
 
-1. Abra [Google AI Studio — chaves](https://aistudio.google.com/api-keys). Crie uma chave em um projeto dedicado no **Free tier**, sem habilitar Cloud Billing. Não ative uma assinatura paga.
-2. No [projeto Aguirra na Vercel](https://vercel.com/dashboard), abra Settings → Environment Variables. Adicione `GOOGLE_GENERATIVE_AI_API_KEY` como variável criptografada ou sensível, no servidor, para Production. Cole a chave apenas nesse campo, nunca no chat ou no código público.
-3. Confira no Google que o projeto está no plano gratuito e sem faturamento. Só então configure `AGUIRRA_GOOGLE_FREE_TIER=confirmed-no-billing` na Vercel. Uma chave sozinha não ativa o provedor.
-4. Faça Redeploy do último deployment. Para desenvolvimento local, use as mesmas variáveis no `.env.local`, ignorado pelo Git. O modo local não exige banco na nuvem.
-5. Em uma janela anônima, pergunte “Qual é a capital da Itália?” e uma pergunta atual específica. Confira a resposta, links e sugestões do Google. Em Configurações, o estado deve indicar pesquisa com Google ativa.
+No projeto Google, mantenha o nível gratuito **sem Cloud Billing**. Na Vercel, em Production:
 
-A chave do Google **ainda não está configurada** neste projeto. Os testes do adaptador usam respostas simuladas; não provam uma consulta real ao Google. Sem chave, saudação, relógio e núcleo funcionam; notícias usam feeds BBC limitados, identificados como RSS. Perguntas gerais na hospedagem informam que a pesquisa ainda não está disponível. Não existe um pedido de login para liberar essas respostas.
+| Variável | Valor |
+| --- | --- |
+| GOOGLE_GENERATIVE_AI_API_KEY | Sua chave, como Secret/Sensitive |
+| AGUIRRA_GOOGLE_FREE_CHAT | confirmed-no-billing |
 
-## Controle do uso gratuito
+A variável antiga AGUIRRA_GOOGLE_FREE_TIER não libera a nova integração e pode ficar desativada. A chave nunca é enviada ao navegador nem ao GitHub. Faça Redeploy ao mudar variáveis. Não compartilhe a chave no chat.
 
-- Modelo fixado: `gemini-2.5-flash-lite`, sem AI Gateway ou troca automática para modelos pagos.
-- Máximo de 100 tentativas de pesquisa por dia para o projeto inteiro, incluindo visitantes e contas. Em produção, a reserva é atômica no banco e ocorre antes de cada chamada ao Google.
-- Visitantes: até 30 pedidos ao servidor por hora por identificador de rede protegido com HMAC. O endereço IP não é salvo em texto; o identificador muda diariamente. Pedidos de relógio e núcleo resolvidos no aparelho não usam essa cota.
-- Sem repetição automática se o Google falhar. A resposta tem limite de tokens e tempo. A cota do Google pode ser menor; nesse caso, o aplicativo informa a indisponibilidade.
-- O token `AGUIRRA_GUEST_SECRET` protege exclusivamente a função de cota. Ele não dá acesso a conversas. Não é a chave do Google. Seu hash SHA-256 fica na tabela privada de configuração; o valor real fica criptografado na Vercel.
-- No modo local, os limites públicos são mantidos em memória e reiniciam com o processo. Para impedir cobranças mesmo após reinício ou alteração de cotas, use um projeto Google **sem faturamento**. O aplicativo não consegue verificar o estado de cobrança a partir de uma chave de API.
+## Funcionamento e limites
 
-A documentação de preços consultada em 05/11/2026 informa entrada e saída gratuitas para esse modelo e Google Search gratuito até 500 solicitações diárias, compartilhadas com Flash. As cotas dependem do projeto e podem mudar. Confirme os [preços oficiais](https://ai.google.dev/gemini-api/docs/pricing) antes de ativar. Não use uma chave de projeto com cobrança: um teto de requisições não transforma uma API paga em gratuita.
+- Perguntas sem conta; histórico e núcleo ficam no navegador. Conta só para sincronização.
+- O contexto inclui até seis mensagens recentes e memórias relevantes. Perguntas não viram preferências.
+- Uma resposta sem documento consultado recebe o aviso “Resposta da IA, sem pesquisa verificada na web”. Ela pode errar e não representa checagem factual.
+- Fontes só entram na lista se vierem dos documentos realmente consultados. Não se utilizam URLs inventadas pelo modelo.
+- Preços, clima e outros fatos atuais sem fonte recebem uma limitação explícita. Notícias podem ser resumidas apenas a partir dos títulos e descrições do RSS, sem alegar leitura integral das matérias.
+- Se a IA falhar durante notícias, as manchetes RSS continuam disponíveis.
+- São até 100 chamadas de geração por dia para o projeto inteiro e 30 pedidos/hora por rede de visitante. O provedor pode impor limites menores. Não há tentativas automáticas ou troca para modelo pago.
+- O limite do aplicativo não garante gratuidade de uma conta paga: mantenha o projeto Google sem faturamento. O programa não consegue verificar o estado de cobrança usando apenas uma chave.
+- O Free Tier pode usar dados para melhorar produtos, conforme termos do Google. Evite conteúdo confidencial.
+- Voz usa o navegador; o Windows local oferece áudio sintético alternativo, inclusive para visitantes. O teste no tablet Android 4.4 continua necessário.
 
-No plano gratuito, o Google pode usar os dados enviados para melhorar os produtos, conforme seus [termos](https://ai.google.dev/gemini-api/terms). Não envie informações confidenciais. A sincronização continua nos limites do Supabase Free e Vercel Hobby, sem upgrade automático.
+## Referências oficiais
 
-## Coerência e fontes
+- Preços: https://ai.google.dev/gemini-api/docs/pricing#gemini-3.5-flash-lite
+- Modelo: https://ai.google.dev/gemini-api/docs/models/gemini-3.5-flash-lite
+- Restrições dos modelos antigos: https://ai.google.dev/gemini-api/docs/deprecations
+- API pública de conhecimento: https://www.mediawiki.org/wiki/API:Search
 
-A pergunta original e até seis mensagens recentes permitem resolver referências como “e no Brasil?”. Preferências vêm apenas do núcleo atual. “Memória RAM” não é confundida com memória pessoal; perguntas sobre horários de eventos não viram o relógio atual. Em notícias RSS, o assunto específico é filtrado: não trocamos uma consulta sobre carros por manchetes genéricas da região.
-
-Respostas do Google só são apresentadas como pesquisadas se trouxerem consultas, fontes HTTPS e trechos de suporte. Uma pergunta curta de esclarecimento pode ser devolvida sem fontes. Falhas não geram fatos inventados nem uma pesquisa simulada. Os links e os trechos associados aparecem na resposta. O conteúdo de sugestões fornecido pelo Google é exibido em iframe isolado, sem permissão para scripts, formulários ou acesso à página principal.
-
-## Banco
-
-Para replicar a hospedagem, aplique `database/schema.sql` e depois `database/migrations/20261104_public_questions.sql`. Gere um segredo aleatório de pelo menos 32 caracteres; configure-o na Vercel e cadastre somente seu SHA-256 em `aguirra_private.public_config`. Não conceda acesso anônimo às tabelas de usuários.
-
-## Voz sem conta
-
-A leitura usa a voz disponível no navegador. No modo local Windows, visitantes também podem pedir áudio sem autenticação: a resposta é enviada por POST ao sintetizador local, sem texto na URL. Isso depende das vozes em português instaladas no Windows e da reprodução de áudio do navegador do tablet. Na hospedagem online, essa alternativa Windows não está disponível.
+Os preços e permissões podem mudar; não ative faturamento para contornar uma falha de cota ou disponibilidade.

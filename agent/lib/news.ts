@@ -32,6 +32,6 @@ export async function readNews(query: string) {
   return { region, checked_at: new Date().toISOString(), scope: "Manchetes de feeds RSS públicos da BBC. Não é busca de toda a web nem cobertura completa.", articles: selectArticles(items, query) };
 }
 export function headlinesText(result: Awaited<ReturnType<typeof readNews>>) {
-  if (!result.articles.length) return "Não encontrei manchetes sobre o assunto pedido no feed consultado. Esse feed é limitado e não substitui uma pesquisa do Google; a chave gratuita do projeto ainda precisa ser configurada.";
+  if (!result.articles.length) return "Não encontrei manchetes sobre o assunto pedido no feed consultado. Esse feed é limitado e não substitui uma pesquisa do Google; a pesquisa integrada do Google não está disponível no plano gratuito usado por este projeto.";
   return "Estas são as manchetes recentes do feed consultado. Não é uma cobertura completa dos acontecimentos.\n\n" + result.articles.map((item, i) => `${i + 1}. ${item.title}\n${item.description}\nFonte: ${item.source}${item.published_at ? " · " + new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short", timeZone: "America/Sao_Paulo" }).format(new Date(item.published_at)) : ""}\n${item.url}`).join("\n\n") + "\n\nConsulta em " + result.checked_at + ". As manchetes internacionais podem estar em inglês.";
 }
