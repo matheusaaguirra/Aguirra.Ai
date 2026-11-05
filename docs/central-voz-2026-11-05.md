@@ -9,3 +9,5 @@
 - Compatibilidade sintática ES5 preservada. Modo econômico mantém a esfera parada em repouso e reduz a frequência de desenho quando ativa; preferência por movimento reduzido é respeitada.
 
 Validação: 26 testes automatizados, checagem ES5, TypeScript e build de produção passaram. No navegador de prévia foram verificados envio sem navegação para chat, legenda, resposta completa e abertura pelo histórico. Seleção de voz, eventos de fala/legenda, cancelamento, bloqueio de autoplay e fallback foram testados com simuladores. Este ambiente de navegador não tem voz portuguesa instalada; a qualidade audível no tablet Android 4.4 e no Windows precisa ser conferida nesses aparelhos.
+
+Produção: deploy `dpl_GtzBJyiGbpst712AFstceZnATBGU` ficou READY no domínio https://aguirra-ai.vercel.app/. Foi enviada uma pergunta real sobre memória RAM; a resposta apareceu na Central, coerente, sem o cabeçalho antigo e com a resposta completa acessível pelo detalhe. Não havia fontes anexadas nessa resposta, e nenhuma foi inventada na interface. Registro visual: `aguirra-orb-2026-11-05.jpg`.
