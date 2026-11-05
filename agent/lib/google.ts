@@ -47,7 +47,15 @@ export async function researchGoogle(message: string, context: ConversationConte
     return groundedAnswer(result.text, result.sources, result.providerMetadata?.google as GoogleProviderMetadata | undefined);
   } catch (error) {
     if (error instanceof AppError) throw error;
-    console.error('aguirra_google_failed', error instanceof Error ? error.name : 'unknown');
+    const failure = error as { statusCode?: number; responseBody?: string; name?: string };
+    let provider: any = {};
+    try { provider = JSON.parse(failure.responseBody || '{}').error || {}; } catch { /* Do not log raw requests or credentials. */ }
+    const detail = String(provider.message || '').replace(/AIza[\w-]+/g, '[redacted]').replace(/([?&]key=)[^&\s]+/gi, '$1[redacted]').slice(0, 300);
+    console.error('aguirra_google_failed', JSON.stringify({ name: failure.name, status: failure.statusCode, provider_status: provider.status, detail }));
+    if (failure.statusCode === 429) throw new AppError(503, 'O Google recusou a consulta porque a cota gratuita está esgotada ou não foi liberada para este projeto/modelo. Nenhum plano pago foi ativado.');
+    if (failure.statusCode === 401 || /API key not valid|API_KEY_INVALID/i.test(detail)) throw new AppError(503, 'O Google não reconheceu a chave configurada no projeto. Confira a chave salva na Vercel.');
+    if (failure.statusCode === 403) throw new AppError(503, 'O Google bloqueou o acesso deste projeto à API. Confira as permissões e a disponibilidade do nível gratuito no Google AI Studio.');
+    if (failure.statusCode === 404) throw new AppError(503, 'O modelo gratuito configurado não está disponível no Google para este projeto. Nenhum modelo pago foi utilizado.');
     throw new AppError(503, 'A pesquisa do Google não respondeu ou a cota gratuita está indisponível. Não consegui verificar a informação agora. Tente novamente mais tarde.');
   }
 }
