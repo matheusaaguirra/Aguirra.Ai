@@ -2,7 +2,9 @@
 
 Aguirra usa um registro contínuo de perguntas e respostas, com memória revisável. Não há tela de chat, botão de nova conversa ou lista de conversas. O histórico antigo é preservado. O banco mantém um único contêiner técnico por proprietário na tabela já existente; novas perguntas reutilizam esse contêiner.
 
-## Ativar ElevenLabs sem contratar plano
+## Configuração aplicada e manutenção
+
+A chave já está configurada em produção. Os passos abaixo documentam a configuração e servem para uma futura rotação.
 
 1. Na conta ElevenLabs, mantenha o plano **Free** e a cobrança por excedente desativada. O uso gratuito tem uma cota, não é ilimitado.
 2. Crie uma chave no painel do ElevenLabs. Ela precisa de acesso a **Text to Speech**, **Speech to Text** e leitura de **User/Subscription**, usada para verificar o plano antes de gerar áudio.
@@ -12,7 +14,7 @@ Aguirra usa um registro contínuo de perguntas e respostas, com memória revisá
 
 O servidor consulta `/v1/user/subscription` antes de cada geração. Só aceita `tier=free`, excedentes desativados e créditos disponíveis. Plano pago, cota esgotada ou falha na verificação bloqueiam a geração. O Aguirra não muda de plano nem tenta um provedor pago. Repetir um dos dois últimos trechos no mesmo carregamento usa o áudio em memória, sem gerar novamente.
 
-A integração já está implementada. A chave ElevenLabs ainda não estava configurada na Vercel nesta revisão; por isso não houve geração real nem avaliação audível desse serviço. Enquanto ela não for cadastrada, o aplicativo informa a pendência e pode usar a voz disponível no aparelho como alternativa.
+ElevenLabs foi ativado em produção em 05/11/2026. A chave exclusiva do Aguirra foi salva como Secret somente em Production, com acesso a Text to Speech, Speech to Text e consulta do plano, limite de 10.000 créditos por período e desativação automática em caso de vazamento. A conta permaneceu no plano Free; nenhum plano pago ou excedente foi contratado. A transferência foi realizada diretamente entre os painéis, sem arquivo intermediário de credencial.
 
 ## Microfone
 
@@ -30,7 +32,7 @@ As legendas ElevenLabs usam o alinhamento temporal retornado pelo serviço. A re
 
 ## Validação
 
-35 testes automatizados passaram: plano gratuito e cotas, gravações inválidas/longas, cancelamento, texto parcial/final, encerramento dos tracks, cache e alinhamento de legendas, histórico contínuo, memória e isolamento existentes. TypeScript, ES5 e build passaram. Na prévia foram verificados envio, legenda, histórico por pergunta, ausência de nova conversa e diagnóstico HTTPS do microfone. Testes do serviço ElevenLabs usam respostas simuladas, sem consumir créditos. Captura física e qualidade de áudio no tablet não foram verificadas neste ambiente.
+35 testes automatizados passaram: plano gratuito e cotas, gravações inválidas/longas, cancelamento, texto parcial/final, encerramento dos tracks, cache e alinhamento de legendas, histórico contínuo, memória e isolamento existentes. TypeScript, ES5 e build passaram. Na prévia foram verificados envio, legenda, histórico por pergunta, ausência de nova conversa e diagnóstico HTTPS do microfone. Os testes automatizados do serviço ElevenLabs usam respostas simuladas. Após ativar a chave, também foi feito um teste real de geração e transcrição, consumindo apenas a cota gratuita. Captura física e qualidade de áudio no tablet não foram verificadas neste ambiente.
 
 Referências oficiais:
 - https://elevenlabs.io/docs/eleven-api/quickstart
@@ -39,4 +41,4 @@ Referências oficiais:
 - https://elevenlabs.io/docs/api-reference/speech-to-text/convert
 - https://elevenlabs.io/pricing/api
 
-Produção: o deploy `dpl_CVWNjUWCD47x7caG3Z54XuGg19g6` ficou READY em https://aguirra-ai.vercel.app/. Uma pergunta real sobre som retornou resposta coerente pela rota `/api/ask`; outra pergunta de horário apareceu separadamente no histórico, e a primeira foi reaberta na Central. A tela confirmou ElevenLabs aguardando configuração. Em HTTPS, o botão do microfone entrou na etapa de solicitar permissão e ofereceu cancelar; não houve captura física validada. A mensagem de erro foi ajustada para permanecer visível após o encerramento do reconhecimento. Políticas de propriedade e restrições das tabelas existentes foram conferidas por consultas de metadados no Supabase; não houve alteração de schema ou RLS.
+Produção: o deploy `dpl_6cwUokBKTSxmTuDNFAkaT8ZhcD3g` ficou READY em https://aguirra-ai.vercel.app/, carregando o Secret de produção. A interface reconheceu ElevenLabs disponível e concluiu a reprodução em Testar voz. Um teste pela API gerou MP3 de 75.275 bytes, com 4,64 segundos e alinhamento temporal; o arquivo foi convertido para WAV mono de 16 kHz e transcrito pelo Scribe v2. A frase foi reconhecida, com variações ortográficas nos nomes próprios. Esse teste valida geração, decodificação e transcrição, sem equivaler a avaliação auditiva ou captura física no tablet. A consulta do plano gratuito passou antes das chamadas reais. Registro visual: `aguirra-elevenlabs-ativo-2026-11-05.jpg`.
