@@ -8,6 +8,7 @@ import { answerQuestion, guestInput, guestContext, guestLearned } from "../lib/a
 import { googleReady } from "../lib/google.ts";
 import { intent } from "../lib/questions.ts";
 import { claimPublicBudget } from "../lib/public-budget.ts";
+import { googleLoginAvailable, startGoogleLogin, completeGoogleLogin } from "../lib/google-login.ts";
 import { serverVoiceAvailable, synthesizeWave } from "../lib/voice.ts";
 
 const uuid = z.string().uuid();
@@ -72,9 +73,11 @@ async function handle(request: Request, args: RouteHandlerArgs): Promise<Respons
   let session: Session | null = null;
   try {
     safeOrigin(request); const url = new URL(request.url), resource = args.params.resource;
+    if (resource === "google" && request.method === "POST") return await startGoogleLogin(request);
+    if (resource === "google-callback" && request.method === "GET") return await completeGoogleLogin(request);
     if (resource === "session" && request.method === "GET") {
       session = await getSession(request, true);
-      return json({ user: session?.user || null, local: localMode(), ai: googleReady() || (localMode() && process.env.AGUIRRA_AI_ENABLED !== "false"), guest_chat: true, google_ready: googleReady(), google_search: false, model: googleReady() ? "gemini-3.5-flash-lite" : null, search: true, search_mode: googleReady() ? "public_sources" : "rss", paid_apis: false, tts_server: serverVoiceAvailable() }, 200, session?.cookies);
+      return json({ user: session?.user || null, local: localMode(), ai: googleReady() || (localMode() && process.env.AGUIRRA_AI_ENABLED !== "false"), guest_chat: true, google_login: await googleLoginAvailable(), google_ready: googleReady(), google_search: false, model: googleReady() ? "gemini-3.5-flash-lite" : null, search: true, search_mode: googleReady() ? "public_sources" : "rss", paid_apis: false, tts_server: serverVoiceAvailable() }, 200, session?.cookies);
     }
     if (resource === "auth" && request.method === "POST") {
       const input = z.object({ mode: z.enum(["login", "register"]), email: z.string().email().max(254), password: z.string().min(8).max(128) }).parse(await body(request));

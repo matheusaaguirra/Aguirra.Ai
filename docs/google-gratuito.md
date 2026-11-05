@@ -1,6 +1,6 @@
 # Conversa gratuita do Aguirra — atualização de 05/11/2026
 
-O teste real no projeto retornou 404 para Gemini 2.5 Flash-Lite: o Google não libera mais esse modelo a novos usuários. O aplicativo foi adaptado para `gemini-3.5-flash-lite`, com entrada e saída de texto disponíveis no Free Tier.
+O teste real no projeto retornou 404 para Gemini 2.5 Flash-Lite: o Google não libera mais esse modelo a novos usuários. O aplicativo foi adaptado para `gemini-3.5-flash-lite`, com entrada e saída de texto disponíveis no Free Tier. Em alta demanda (HTTP 503), indisponibilidade do modelo (404) ou timeout, há uma única alternativa explícita: gemini-3.1-flash-lite, também gratuita para texto.
 
 A pesquisa integrada Google Search **não** está disponível no Free Tier desse modelo. O aplicativo não chama essa ferramenta nem ativa recursos pagos. Notícias vêm de RSS BBC e consultas enciclopédicas explícitas usam a API pública da Wikipedia. Isso não é uma busca completa do Google nem de toda a web.
 
@@ -23,7 +23,7 @@ A variável antiga AGUIRRA_GOOGLE_FREE_TIER não libera a nova integração e po
 - Fontes só entram na lista se vierem dos documentos realmente consultados. Não se utilizam URLs inventadas pelo modelo.
 - Preços, clima e outros fatos atuais sem fonte recebem uma limitação explícita. Notícias podem ser resumidas apenas a partir dos títulos e descrições do RSS, sem alegar leitura integral das matérias.
 - Se a IA falhar durante notícias, as manchetes RSS continuam disponíveis.
-- São até 100 chamadas de geração por dia para o projeto inteiro e 30 pedidos/hora por rede de visitante. O provedor pode impor limites menores. Não há tentativas automáticas ou troca para modelo pago.
+- São até 100 chamadas de geração por dia para o projeto inteiro e 30 pedidos/hora por rede de visitante. O provedor pode impor limites menores. Não há repetição automática no mesmo modelo nem troca para modelo pago. A alternativa gratuita só é tentada uma vez em falhas temporárias/indisponibilidade; nunca em erro de cota (429), chave (401) ou permissão (403). Cada tentativa consome a cota global.
 - O limite do aplicativo não garante gratuidade de uma conta paga: mantenha o projeto Google sem faturamento. O programa não consegue verificar o estado de cobrança usando apenas uma chave.
 - O Free Tier pode usar dados para melhorar produtos, conforme termos do Google. Evite conteúdo confidencial.
 - Voz usa o navegador; o Windows local oferece áudio sintético alternativo, inclusive para visitantes. O teste no tablet Android 4.4 continua necessário.

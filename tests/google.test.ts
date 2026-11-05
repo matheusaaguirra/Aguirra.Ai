@@ -22,7 +22,10 @@ test('Free chat uses the supported fixed model without any paid Google Search to
     process.env.AGUIRRA_GOOGLE_FREE_CHAT = 'confirmed-no-billing';
     const result = await respondGoogle('O que é RAM?', { history: [], memories: [] }, documents);
     assert.equal(result.mode, 'public_sources'); assert.equal(calls, 1);
+    const successFetch = globalThis.fetch; let outage = true;
+    globalThis.fetch = async (url, options) => { if (outage) { outage = false; calls++; return Response.json({ error: { message: 'High demand' } }, { status: 503 }); } assert.match(String(url), /gemini-3.1-flash-lite/); return successFetch(String(url).replace('gemini-3.1-flash-lite', GOOGLE_MODEL), options); };
+    await respondGoogle('teste', { history: [], memories: [] }, documents); assert.equal(calls, 3);
     globalThis.fetch = async () => { calls++; return Response.json({ error: { message: 'Free quota exhausted', code: 429 } }, { status: 429 }); };
-    await assert.rejects(respondGoogle('teste', { history: [], memories: [] }), /cota gratuita/); assert.equal(calls, 2);
+    await assert.rejects(respondGoogle('teste', { history: [], memories: [] }), /cota gratuita/); assert.equal(calls, 4);
   } finally { globalThis.fetch = originalFetch; for (const k of Object.keys(process.env)) if (!(k in saved)) delete process.env[k]; Object.assign(process.env, saved); }
 });
