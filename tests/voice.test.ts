@@ -68,3 +68,13 @@ test('Speech preserves long content across bounded chunks and reports autoplay b
   context.AguirraVoice.speak('Teste de áudio.'); spoken.at(-1).onerror({error:'not-allowed'}); assert.equal(states.at(-1), 'blocked');
   assert.equal(speechText('Consulta a fontes públicas.\n\nUma resposta.'), 'Uma resposta.');
 });
+
+test('ElevenLabs audio uses timing for captions, caches replay, and cancels stale generations', () => {
+  let xhr:any, audio:any, calls=0;const captions:string[]=[],states:string[]=[];
+  const context:any={atob:(s:string)=>Buffer.from(s,'base64').toString('binary'),Blob:function(this:any){},URL:{createObjectURL:()=> 'blob:eleven',revokeObjectURL(){}},
+    XMLHttpRequest:function(this:any){xhr=this;this.open=(method:string,path:string)=>{assert.equal(method,'POST');assert.equal(path,'/api/speech');};this.setRequestHeader=()=>{};this.send=(body:string)=>{calls++;assert.equal(JSON.parse(body).text,'Olá. Tudo bem?');};this.abort=()=>{};},
+    Audio:function(this:any){audio=this;this.play=()=>{this.onplay();};this.pause=()=>{};}
+  };
+  vm.runInNewContext(readFileSync('public/voice.js','utf8'),context);context.AguirraVoice.configure({voice:'__elevenlabs__',onState:(s:string)=>states.push(s),onCaption:(s:string)=>captions.push(s)});context.AguirraVoice.setEleven(true);
+  context.AguirraVoice.speak('Olá. Tudo bem?');assert.equal(states.at(-1),'loading');xhr.status=200;xhr.responseText=JSON.stringify({audio_base64:'SUQz',alignment:{characters:Array.from('Olá. Tudo bem?'),character_start_times_seconds:[0,.1,.2,.3,.4,1,1.1,1.2,1.3,1.4,1.5,1.6,1.7]}});xhr.onload();assert.equal(states.at(-1),'speaking');assert.equal(captions.at(-1),'Olá.');audio.currentTime=1.7;audio.ontimeupdate();assert.equal(captions.at(-1),'Tudo bem?');audio.onended();assert.equal(states.at(-1),'idle');context.AguirraVoice.speak('Olá. Tudo bem?');assert.equal(calls,1);context.AguirraVoice.stop();context.AguirraVoice.clearCache();context.AguirraVoice.speak('Olá. Tudo bem?');const stale=xhr;context.AguirraVoice.stop();const count=states.length;stale.onload();assert.equal(states.length,count);
+});

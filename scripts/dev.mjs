@@ -7,7 +7,7 @@ const port = Number(process.env.PORT || (portArg >= 0 ? process.argv[portArg + 1
 const agent = spawn(process.execPath, ['node_modules/eve/bin/eve.js', 'dev', '--no-ui', '--port', '2000'], { stdio: ['ignore', 'pipe', 'pipe'], env: process.env });
 mkdirSync('.aguirra', { recursive: true });
 for (const stream of [agent.stdout, agent.stderr]) stream.on('data', chunk => { process.stderr.write(chunk); appendFileSync('.aguirra/dev-server.log', chunk); });
-const files = { '/': ['index.html', 'text/html'], '/styles.css': ['styles.css', 'text/css'], '/app.js': ['app.js', 'text/javascript'], '/voice.js': ['voice.js', 'text/javascript'], '/memory-core.js': ['memory-core.js', 'text/javascript'], '/icon.svg': ['icon.svg', 'image/svg+xml'] };
+const files = { '/': ['index.html', 'text/html'], '/styles.css': ['styles.css', 'text/css'], '/app.js': ['app.js', 'text/javascript'], '/voice.js': ['voice.js', 'text/javascript'], '/microphone.js': ['microphone.js', 'text/javascript'], '/memory-core.js': ['memory-core.js', 'text/javascript'], '/icon.svg': ['icon.svg', 'image/svg+xml'] };
 const server = createServer(async (request, response) => {
   try {
     const url = new URL(request.url, `http://${request.headers.host}`);

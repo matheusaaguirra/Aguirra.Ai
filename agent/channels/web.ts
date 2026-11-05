@@ -9,6 +9,8 @@ import { googleReady } from "../lib/google.ts";
 import { intent } from "../lib/questions.ts";
 import { claimPublicBudget } from "../lib/public-budget.ts";
 import { googleLoginAvailable, startGoogleLogin, completeGoogleLogin } from "../lib/google-login.ts";
+import { assistantLog, assistantHistory } from "../lib/assistant-log.ts";
+import { elevenReady, elevenSpeech, elevenTranscribe } from "../lib/elevenlabs.ts";
 import { serverVoiceAvailable, synthesizeWave } from "../lib/voice.ts";
 
 const uuid = z.string().uuid();
@@ -17,10 +19,10 @@ function json(data: unknown, status = 200, cookies: string[] = []) {
   const headers = new Headers({ "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", "Referrer-Policy": "same-origin" });
   cookies.forEach(c => headers.append("Set-Cookie", c)); return new Response(JSON.stringify(data), { status, headers });
 }
-async function body(request: Request) {
+async function body(request: Request, limit = 128_000) {
   const reader = request.body?.getReader(); if (!reader) return {};
   const chunks: Uint8Array[] = []; let size = 0;
-  while (true) { const { done, value } = await reader.read(); if (done) break; size += value.length; if (size > 128_000) { await reader.cancel(); throw new AppError(413, "O pedido excedeu o limite de tamanho."); } chunks.push(value); }
+  while (true) { const { done, value } = await reader.read(); if (done) break; size += value.length; if (size > limit) { await reader.cancel(); throw new AppError(413, "O pedido excedeu o limite de tamanho."); } chunks.push(value); }
   try { return JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { throw new AppError(400, "Pedido JSON inválido."); }
 }
 async function saveMemory(session: Session, input: z.infer<typeof memoryInput>) {
@@ -47,22 +49,20 @@ async function chat(request: Request, args: RouteHandlerArgs, session: Session) 
   }
   const quota = await db<boolean>(session, "rpc/aguirra_claim_request", "POST", {});
   if (!quota) throw new AppError(429, "Seu limite desta hora foi atingido. Aguarde antes de enviar novas perguntas.");
-  const message = redact(input.message), threadId = input.thread_id || randomUUID();
-  if (input.thread_id) { const found = await db(session, `aguirra_threads?id=eq.${threadId}&select=id`); if (!found.length) throw new AppError(404, "Conversa não encontrada na sua conta."); }
-  else await db(session, "aguirra_threads", "POST", { id: threadId, user_id: session.user.id, title: message.slice(0, 80) });
+  const message = redact(input.message), threadId = await assistantLog(session);
   await db(session, "aguirra_messages", "POST", { id: input.request_id, user_id: session.user.id, thread_id: threadId, role: "user", content: message });
   const data = await loadData(session), learned = data.settings.memory_enabled === false ? [] : extract(message);
   for (const memory of learned) await db(session, "aguirra_memories?on_conflict=user_id,key", "POST", { user_id: session.user.id, ...memory, source_message_id: input.request_id, updated_at: new Date().toISOString() }, "resolution=merge-duplicates,return=representation");
   for (const name of topics(message)) await db(session, "rpc/aguirra_touch_topic", "POST", { topic_name: name });
   const allMemories: Memory[] = await db(session, "aguirra_memories?select=*&order=updated_at.desc&limit=500");
   const context = intent(message) === "memory" ? allMemories.slice(0, 50) : relevant(allMemories, message);
-  const previous = data.messages.filter((m: any) => m.thread_id === threadId && m.id !== input.request_id && !m.exclude_context && !m.failed).slice(-6).map((m: any) => ({ role: m.role as "user" | "assistant", text: m.content.slice(0, 1200) }));
+  const previous = assistantHistory(data.messages, input.request_id);
   try {
     const { reply, sources, search_entry_point, mode } = await answerQuestion(message, { history: previous, memories: context.map(m => ({ category: m.category, content: m.content })) }, learned);
     const replyId = randomUUID();
     await db(session, "aguirra_messages", "POST", { id: replyId, user_id: session.user.id, thread_id: threadId, role: "assistant", content: reply, sources, search_entry_point: search_entry_point || null });
     await db(session, `aguirra_messages?id=eq.${input.request_id}`, "PATCH", { reply_id: replyId });
-    return json({ thread_id: threadId, reply, learned: learned.length > 0, sources, search_entry_point, mode }, 200, session.cookies);
+    return json({ thread_id: threadId, answer_id: replyId, reply, learned: learned.length > 0, sources, search_entry_point, mode }, 200, session.cookies);
   } catch (error) {
     const message = error instanceof AppError ? error.message : "Não consegui concluir a resposta. No modo local, confira se o Ollama está aberto e o modelo foi baixado. Seu pedido e as memórias já formadas foram salvos.";
     await db(session, "aguirra_messages", "POST", { user_id: session.user.id, thread_id: threadId, role: "assistant", content: message, failed: true });
@@ -77,7 +77,7 @@ async function handle(request: Request, args: RouteHandlerArgs): Promise<Respons
     if (resource === "google-callback" && request.method === "GET") return await completeGoogleLogin(request);
     if (resource === "session" && request.method === "GET") {
       session = await getSession(request, true);
-      return json({ user: session?.user || null, local: localMode(), ai: googleReady() || (localMode() && process.env.AGUIRRA_AI_ENABLED !== "false"), guest_chat: true, google_login: await googleLoginAvailable(), google_ready: googleReady(), google_search: false, model: googleReady() ? "gemini-3.5-flash-lite" : null, search: true, search_mode: googleReady() ? "public_sources" : "rss", paid_apis: false, tts_server: serverVoiceAvailable() }, 200, session?.cookies);
+      return json({ user: session?.user || null, local: localMode(), ai: googleReady() || (localMode() && process.env.AGUIRRA_AI_ENABLED !== "false"), guest_chat: true, google_login: await googleLoginAvailable(), google_ready: googleReady(), google_search: false, model: googleReady() ? "gemini-3.5-flash-lite" : null, search: true, search_mode: googleReady() ? "public_sources" : "rss", paid_apis: false, tts_server: serverVoiceAvailable(), elevenlabs_ready: elevenReady(), transcription_ready: elevenReady() }, 200, session?.cookies);
     }
     if (resource === "auth" && request.method === "POST") {
       const input = z.object({ mode: z.enum(["login", "register"]), email: z.string().email().max(254), password: z.string().min(8).max(128) }).parse(await body(request));
@@ -88,9 +88,16 @@ async function handle(request: Request, args: RouteHandlerArgs): Promise<Respons
       session = await getSession(request, true); if (session && localMode()) localLogout(session.token); else if (session) { const { url: base, key } = config(); const result = await fetch(`${base}/auth/v1/logout?scope=local`, { method: "POST", headers: { apikey: key, Authorization: `Bearer ${session.token}` }, signal: AbortSignal.timeout(10_000) }); if (!result.ok && result.status !== 401) throw new AppError(503, "Não foi possível encerrar a sessão. Tente novamente."); }
       return json({ ok: true }, 200, ["aguirra_access=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0", "aguirra_refresh=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0"]);
     }
-    if (resource === "chat" && request.method === "POST") {
+    if ((resource === "ask" || resource === "chat") && request.method === "POST") {
       session = await getSession(request, true);
       return session ? await chat(request, args, session) : await guestChat(request, args);
+    }
+    if ((resource === "speech" || resource === "transcribe") && request.method === "POST") {
+      if (!elevenReady()) throw new AppError(503, "ElevenLabs aguarda a chave de uma conta gratuita no servidor.");
+      await claimPublicBudget('guest', args.requestIp || 'unknown');
+      if (resource === "speech") { const input = z.object({ text: z.string().trim().min(1).max(1500) }).parse(await body(request)); return json(await elevenSpeech(input.text)); }
+      const input = z.object({ audio: z.string().min(1).max(900000) }).parse(await body(request, 950000));
+      return json({ text: await elevenTranscribe(input.audio) });
     }
     if (resource === "voice" && request.method === "POST") {
       if (!serverVoiceAvailable()) throw new AppError(503, "Use uma voz disponível no navegador ou execute o Aguirra no Windows.");

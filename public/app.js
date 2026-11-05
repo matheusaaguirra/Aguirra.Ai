@@ -1,8 +1,10 @@
 (function () {
   'use strict';
   var M = window.AguirraMemory, storageKey = 'aguirra.local.v1', preferencesKey = 'aguirra.preferences.v1';
-  var user = null, localApi = false, voiceServer = false, googleLoginReady = false, sessionReady = false, busy = false, activeView = 'home', currentThread = null, memoryFilter = 'all', editingMemory = null, authMode = 'login', toastTimer, modalFocus = null;
+  var user = null, localApi = false, voiceServer = false, googleLoginReady = false, sessionReady = false, busy = false, activeView = 'home', memoryFilter = 'all', editingMemory = null, authMode = 'login', toastTimer, modalFocus = null;
+  var elevenReady = false, micProcessing = false;
   var oldAndroid = /Android 4\./.test(navigator.userAgent), state = empty(), preferences = readJSON(preferencesKey, { low_power: oldAndroid, voice: true });
+  if (preferences.voice_provider_version !== 1) { preferences.voice_name = '__elevenlabs__'; preferences.voice_provider_version = 1; savePreferences(); }
   if (preferences.voice_version !== 2) { preferences.voice = true; preferences.voice_version = 2; savePreferences(); }
   function $(id) { return document.getElementById(id); }
   function empty() { return { memories: [], threads: [], messages: [], topics: [], settings: { memory_enabled: true } }; }
@@ -18,7 +20,7 @@
   function request(method, path, body, callback) {
     var xhr = new XMLHttpRequest(), finished = false;
     function finish(err, data) { if (finished) return; finished = true; callback(err, data); }
-    xhr.open(method, path, true); xhr.timeout = path === '/api/chat' ? 180000 : 20000;
+    xhr.open(method, path, true); xhr.timeout = path === '/api/ask' || path === '/api/transcribe' ? 180000 : 20000;
     xhr.setRequestHeader('Accept', 'application/json');
     if (body) xhr.setRequestHeader('Content-Type', 'application/json');
     xhr.onreadystatechange = function () { if (xhr.readyState !== 4) return; var data; try { data = JSON.parse(xhr.responseText); } catch (e) { data = {}; } if (xhr.status >= 200 && xhr.status < 300) finish(null, data); else finish({ status: xhr.status, message: data.error || 'Não consegui conectar ao servidor agora.' }, data); };
@@ -27,12 +29,11 @@
     xhr.send(body ? JSON.stringify(body) : null);
   }
   function go(view) {
-    if (view === 'chat') view = 'home';
-    var views = document.querySelectorAll('.view'), buttons = document.querySelectorAll('[data-view]'), names = { home: 'Central', chat: 'Conversas', brain: 'Mapa cerebral', history: 'Histórico', settings: 'Configurações' }, i;
+    var views = document.querySelectorAll('.view'), buttons = document.querySelectorAll('[data-view]'), names = { home: 'Central', brain: 'Mapa cerebral', history: 'Histórico', settings: 'Configurações' }, i;
     activeView = view;
     for (i = 0; i < views.length; i++) views[i].className = 'view' + (views[i].id === 'view-' + view ? ' active' : '');
     for (i = 0; i < buttons.length; i++) buttons[i].className = 'nav-item' + (buttons[i].getAttribute('data-view') === view ? ' selected' : '');
-    $('page-name').textContent = names[view]; if (view === 'brain') renderBrain(); if (view === 'history') renderHistory(); if (view === 'settings') renderSettings(); if (view === 'chat') renderMessages();
+    $('page-name').textContent = names[view]; if (view === 'brain') renderBrain(); if (view === 'history') renderHistory(); if (view === 'settings') renderSettings();
     if (view !== 'home' || preferences.low_power) drawOrb(0); else startOrb();
     window.scrollTo(0, 0);
   }
@@ -45,31 +46,10 @@
     $('context-description').textContent = count ? 'Preferências, objetivos e ideias que dão contexto às suas próximas conversas.' : 'Seu núcleo começa com uma conversa. Conte uma preferência ou algo que queira guardar.';
     $('last-connection').textContent = count ? state.memories[0].content : 'As ideias que você guardar aparecerão aqui.';
     $('account-name').textContent = user ? (user.email || 'Sua conta') : 'Seu espaço pessoal'; wipe($('avatar')); $('avatar').appendChild(icon('user')); $('account-state').textContent = user ? (localApi ? 'Memória no seu computador' : 'Memória sincronizada') : 'Memória neste aparelho';
-    $('chat-storage-label').textContent = user ? (localApi ? 'Salvo no seu computador' : 'Sincronizado na sua conta') : 'Neste aparelho';
-    renderSettings(); if (activeView === 'brain') renderBrain(); if (activeView === 'chat') renderMessages(); if (activeView === 'history') renderHistory();
+    renderSettings(); if (activeView === 'brain') renderBrain(); if (activeView === 'history') renderHistory();
   }
-  function renderMessages() {
-    var box = $('messages'); wipe(box);
-    var messages = state.messages.filter(function (m) { return m.thread_id === currentThread; });
-    if (!messages.length) { var intro = el('div', 'empty-state'); intro.appendChild(el('strong', '', 'Uma conversa muda tudo.')); intro.appendChild(el('span', '', 'Pergunte algo ou conte uma preferência. Seu núcleo começa por aqui.')); box.appendChild(intro); }
-    for (var i = 0; i < messages.length; i++) {
-      var m = messages[i], row = el('article', 'message ' + m.role + (m.failed ? ' message-error' : ''));
-      var avatar = el('span', 'message-avatar' + (m.role === 'assistant' ? ' assistant-mark' : '')); if (m.role === 'user') avatar.appendChild(icon('user')); avatar.setAttribute('aria-hidden', 'true'); row.appendChild(avatar); row.appendChild(el('div', 'message-name', m.role === 'user' ? 'VOCÊ' : 'AGUIRRA'));
-      row.appendChild(el('div', 'message-text', m.content));
-      if (m.sources && m.sources.length) { var sources = el('div', 'sources'); for (var j = 0; j < m.sources.length; j++) { var source = m.sources[j]; if (!/^https:\/\//i.test(source.url)) continue; var link = el('a', 'source-link', '[' + (j + 1) + '] ' + source.title); link.href = source.url; link.target = '_blank'; link.rel = 'noopener noreferrer'; sources.appendChild(link); } row.appendChild(sources); }
-      if (m.search_entry_point && m.search_entry_point.length <= 60000) {
-        var suggestions = el('iframe', 'google-suggestions'); suggestions.title = 'Sugestões de pesquisa do Google';
-        suggestions.setAttribute('sandbox', 'allow-popups allow-popups-to-escape-sandbox'); suggestions.setAttribute('referrerpolicy', 'no-referrer');
-        var policy = "default-src 'none'; style-src 'unsafe-inline'; img-src data: https://www.gstatic.com; base-uri 'none'; form-action 'none'";
-        suggestions.src = 'data:text/html;charset=utf-8,' + encodeURIComponent('<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="' + policy + '"></head><body>' + m.search_entry_point + '</body></html>'); row.appendChild(suggestions);
-      }
-      if (m.role === 'assistant') (function (message, article) { var hear = el('button', 'message-voice'); iconLabel(hear, 'volume', 'Ouvir resposta'); hear.onclick = function () { window.AguirraVoice.speak(message.content, user ? message.id : null); }; article.appendChild(hear); }(m, row));
-      row.appendChild(el('div', 'message-time', localDate(m.created_at, true))); box.appendChild(row);
-    }
-    box.scrollTop = box.scrollHeight;
-  }
-  function addMessage(role, text, failed) { var m = { id: uid(), thread_id: currentThread, role: role, content: text, created_at: new Date().toISOString(), sources: [], failed: !!failed }; state.messages.push(m); return m; }
-  function ensureThread(text) { if (currentThread) return; currentThread = uid(); state.threads.unshift({ id: currentThread, title: text.slice(0, 80), created_at: new Date().toISOString() }); }
+  function addMessage(role, text, failed) { var m = { id: uid(), thread_id: state.log_id, role: role, content: text, created_at: new Date().toISOString(), sources: [], failed: !!failed }; state.messages.push(m); return m; }
+  function ensureLog() { if (!state.log_id) state.log_id = uid(); }
   function learn(text, messageId) {
     if (state.settings.memory_enabled !== false) { var extracted = M.extract(text); for (var i = 0; i < extracted.length; i++) putLocalMemory(extracted[i], messageId); }
     var topics = M.topics(text); for (var j = 0; j < topics.length; j++) { var found = null; for (var k = 0; k < state.topics.length; k++) if (state.topics[k].name === topics[j]) found = state.topics[k]; if (found) found.count++; else state.topics.push({ name: topics[j], count: 1 }); }
@@ -87,40 +67,46 @@
     return null;
   }
   function send(text) {
-    text = String(text || '').trim(); if (!text || busy) return; if (!sessionReady) { toast('Conectando ao Aguirra. Envie novamente em um instante.'); return; }
+    text = String(text || '').trim(); if (!text || busy || micProcessing) return; if (!sessionReady) { toast('Conectando ao Aguirra. Envie novamente em um instante.'); return; }
     if (text.length > 4000) { toast('Sua mensagem deve ter até 4.000 caracteres.'); return; }
-    text = M.redact(text); window.AguirraVoice.stop(); go('home'); $('last-question').textContent = text; $('voice-hint').hidden = true; document.querySelector('.home-center').className = 'home-center is-conversing'; $('home-input').value = ''; $('chat-input').value = '';
-    var hadThread = currentThread, guest = !user;
-    ensureThread(text); var pending = addMessage('user', text), payload = { message: text, thread_id: hadThread, request_id: pending.id };
+    text = M.redact(text); window.AguirraVoice.prime(); window.AguirraMicrophone.cancel(); window.AguirraVoice.stop(); go('home'); $('last-question').textContent = text; $('voice-hint').hidden = true; document.querySelector('.home-center').className = 'home-center is-conversing'; $('home-input').value = '';
+    var guest = !user;
+    ensureLog(); var pending = addMessage('user', text), payload = { message: text, request_id: pending.id };
     if (guest) {
       learn(text, pending.id);
       var answer = localAnswer(text, state.settings.memory_enabled !== false ? M.extract(text) : []);
       if (answer) { addMessage('assistant', answer); saveLocal(); render(); speak(answer); return; }
-      payload.history = state.messages.filter(function (m) { return m.thread_id === currentThread && m.id !== pending.id && !m.failed && !m.exclude_context; }).slice(-6).map(function (m) { return { role: m.role, text: m.content.slice(0, 1200) }; });
+      payload.history = state.messages.filter(function (m) { return m.id !== pending.id && !m.failed && !m.exclude_context; }).slice(-6).map(function (m) { return { role: m.role, text: m.content.slice(0, 1200) }; });
       payload.memories = state.settings.memory_enabled === false ? [] : state.memories.slice(0, 50).map(function (m) { return { category: m.category, content: m.content }; });
       payload.memory_enabled = state.settings.memory_enabled !== false;
       saveLocal();
     }
-    renderMessages(); setBusy(true);
-    request('POST', '/api/chat', payload, function (err, result) {
+    setBusy(true);
+    request('POST', '/api/ask', payload, function (err, result) {
       setBusy(false);
       if (err) {
         addMessage('assistant', err.message, true); toast(err.message);
         if (guest) { saveLocal(); render(); speak(err.message); }
-        else { renderMessages(); if (result && result.thread_id) { currentThread = result.thread_id; loadData(function () { speak(err.message); }); } else speak(err.message); }
+        else loadData(function () { speak(err.message); });
         return;
       }
-      if (guest) { var reply = addMessage('assistant', result.reply); reply.sources = result.sources || []; reply.search_entry_point = result.search_entry_point || null; reply.mode = result.mode; saveLocal(); render(); speak(result.reply); return; }
-      currentThread = result.thread_id; loadData(function () { renderMessages(); if (result.learned) toast('Nova conexão guardada no seu núcleo.'); speak(result.reply); });
+      if (guest) { var reply = addMessage('assistant', result.reply); pending.reply_id = reply.id; reply.sources = result.sources || []; reply.search_entry_point = result.search_entry_point || null; reply.mode = result.mode; saveLocal(); render(); speak(result.reply); return; }
+      loadData(function () { if (result.learned) toast('Nova conexão guardada no seu núcleo.'); speak(result.reply); });
     });
   }
-  function setBusy(value) { busy = value; $('chat-submit').disabled = value; $('chat-input').disabled = value; $('home-submit').disabled = value; $('home-input').disabled = value; if (value) { $('orb-response').hidden = false; $('orb-subtitle').textContent = 'Um instante…'; $('full-response').textContent = ''; wipe($('response-sources')); $('replay-response').disabled = true; $('orb-response').querySelector('details').open = false; } updateOrbState(); $('chat-activity').textContent = value ? 'Aguirra está conectando as ideias…' : ''; }
+  function setBusy(value) { busy = value; $('home-submit').disabled = value; $('home-input').disabled = value; if (value) { $('orb-response').hidden = false; $('orb-subtitle').textContent = 'Um instante…'; $('full-response').textContent = ''; wipe($('response-sources')); $('replay-response').disabled = true; $('orb-response').querySelector('details').open = false; } updateOrbState(); }
   function loadData(callback) { request('GET', '/api/data', null, function (err, data) { if (err) { toast(err.message); if (callback) callback(err); return; } state = data; render(); if (callback) callback(); }); }
   function renderHistory() {
-    var list = $('history-list'), query = M.normalize($('history-search').value); wipe(list);
-    var threads = state.threads.filter(function (t) { return M.normalize(t.title).indexOf(query) !== -1 || state.messages.some(function (m) { return m.thread_id === t.id && M.normalize(m.content).indexOf(query) !== -1; }); });
-    if (!threads.length) { list.appendChild(el('div', 'empty-state', query ? 'Nenhuma conversa encontrada para essa busca.' : 'Suas conversas aparecerão aqui. Comece pela Central.')); return; }
-    for (var i = 0; i < threads.length; i++) (function (thread) { var button = el('button', 'history-card'); var total = state.messages.filter(function (m) { return m.thread_id === thread.id; }).length; button.appendChild(el('h3', '', thread.title)); button.appendChild(el('p', '', localDate(thread.created_at) + ' · ' + total + ' mensagens  ↗')); button.onclick = function () { window.AguirraVoice.stop(); currentThread = thread.id; go('home'); $('orb-response').hidden = true; var replies = state.messages.filter(function (m) { return m.thread_id === currentThread && m.role === 'assistant'; }); if (replies.length) presentResponse(replies[replies.length - 1].content); }; list.appendChild(button); }(threads[i]));
+    var list = $('history-list'), query = M.normalize($('history-search').value), found = 0; wipe(list);
+    for (var i = state.messages.length - 1; i >= 0; i--) {
+      var question = state.messages[i]; if (question.role !== 'user') continue;
+      var response = null;
+      for (var j = i + 1; j < state.messages.length; j++) { if (state.messages[j].role === 'user') break; if (state.messages[j].role === 'assistant') { response = state.messages[j]; break; } }
+      if (query && M.normalize(question.content + ' ' + (response ? response.content : '')).indexOf(query) === -1) continue;
+      found++;
+      (function (q, r) { var card = el('button', 'history-card'); card.appendChild(el('span', 'section-label', localDate(q.created_at) + ' · ' + localDate(q.created_at, true))); card.appendChild(el('h3', '', q.content)); card.appendChild(el('p', '', r ? window.AguirraVoice.cleanText(r.content).slice(0, 180) : 'Pergunta registrada.')); card.onclick = function () { if (busy || micProcessing) { toast('Aguarde a resposta atual.'); return; } window.AguirraVoice.stop(); go('home'); $('last-question').textContent = q.content; presentResponse(r ? r.content : 'Esta pergunta foi registrada, mas não tem uma resposta salva.', r, q.content); }; list.appendChild(card); }(question, response));
+    }
+    if (!found) list.appendChild(el('div', 'empty-state', query ? 'Nenhuma pergunta encontrada.' : 'Suas perguntas e respostas serão registradas aqui, sem criar conversas.'));
   }
   function svgEl(tag, attrs, content) { var n = document.createElementNS('http://www.w3.org/2000/svg', tag); for (var k in attrs) if (Object.prototype.hasOwnProperty.call(attrs, k)) n.setAttribute(k, attrs[k]); if (content !== undefined) n.textContent = content; return n; }
   function renderBrain() {
@@ -158,7 +144,7 @@
     $('compatibility-description').textContent = oldAndroid ? 'Android antigo detectado. Recomendamos o modo econômico. Voz e tela cheia dependem do navegador.' : 'O modo econômico funciona em qualquer aparelho. Os recursos de voz aparecem conforme a compatibilidade do navegador.';
     document.body.className = preferences.low_power ? 'low-power' : '';
     iconLabel($('power-shortcut'), 'power', preferences.low_power ? 'Modo econômico ativo' : 'Modo econômico');
-    if (window.AguirraVoice) window.AguirraVoice.setServer(voiceServer);
+    if (window.AguirraVoice) window.AguirraVoice.setServer(voiceServer); window.AguirraVoice.setEleven(elevenReady);
     populateVoices();
   }
   function openModal(id) { modalFocus = document.activeElement; $(id).hidden = false; var input = $(id).querySelector('input,textarea'); if (input) input.focus(); }
@@ -171,17 +157,17 @@
     if (!user) { excludeLocalMemory(m); state.memories = state.memories.filter(function (x) { return x.id !== m.id; }); saveLocal(); render(); return; }
     request('DELETE', '/api/memory?id=' + encodeURIComponent(m.id), null, function (err) { if (err) toast(err.message); else loadData(); });
   }
-  var lastReply = '', lastReplyId = null, voiceActive = false, listening = false, orbPulse = 0;
+  var lastReply = '', lastReplyId = null, voiceActive = false, voiceLoading = false, listening = false, orbPulse = 0;
   function updateOrbState() {
-    var mode = listening ? 'listening' : (busy ? 'thinking' : (voiceActive ? 'speaking' : 'idle'));
+    var mode = listening ? 'listening' : (busy || micProcessing || voiceLoading ? 'thinking' : (voiceActive ? 'speaking' : 'idle'));
     $('orb-stage').className = 'orb-stage is-' + mode;
     $('orb-state').textContent = { listening: 'ESTOU OUVINDO', thinking: 'CONECTANDO IDEIAS', speaking: 'AGUIRRA FALANDO', idle: 'PRONTO PARA VOCÊ' }[mode];
-    $('stop-response').hidden = !voiceActive; startOrb();
+    $('stop-response').hidden = !voiceActive && !voiceLoading; startOrb();
   }
-  function presentResponse(text) {
+  function presentResponse(text, record, questionText) {
     lastReply = window.AguirraVoice.cleanText(text);
-    var messages = state.messages.filter(function (m) { return m.thread_id === currentThread; }), response = null, i;
-    for (i = messages.length - 1; i >= 0; i--) { if (!response && messages[i].role === 'assistant') response = messages[i]; if (messages[i].role === 'user') { $('last-question').textContent = messages[i].content; break; } }
+    var messages = state.messages, response = record || null, i;
+    for (i = messages.length - 1; i >= 0; i--) { if (!response && messages[i].role === 'assistant') response = messages[i]; if (messages[i].role === 'user') { $('last-question').textContent = questionText || messages[i].content; break; } }
     lastReplyId = user && response ? response.id : null;
     $('orb-response').hidden = false; $('replay-response').disabled = false;
     document.querySelector('.home-center').className = 'home-center is-conversing';
@@ -191,39 +177,42 @@
     for (i = 0; i < sources.length; i++) { if (!/^https:\/\//i.test(sources[i].url)) continue; var link = el('a', 'source-link', sources[i].title); link.href = sources[i].url; link.target = '_blank'; link.rel = 'noopener noreferrer'; $('response-sources').appendChild(link); }
   }
   function speak(text) { presentResponse(text); if (preferences.voice) window.AguirraVoice.speak(lastReply, lastReplyId); }
-  function freshConversation() { if (busy) { toast('Aguarde a resposta atual.'); return; } window.AguirraVoice.stop(); currentThread = null; lastReply = ''; lastReplyId = null; $('orb-response').hidden = true; document.querySelector('.home-center').className = 'home-center'; go('home'); $('home-input').focus(); }
-  function populateVoices() { if (!window.AguirraVoice) return; var available = window.AguirraVoice.voices(), select = $('setting-voice-name'); wipe(select); var automatic = el('option', '', 'Automática em português'); automatic.value = ''; select.appendChild(automatic); for (var i = 0; i < available.length; i++) { var option = el('option', '', available[i].name + ' (' + available[i].lang + ')'); option.value = available[i].name; select.appendChild(option); } if (voiceServer) { var computer = el('option', '', 'Voz do meu computador (Windows)'); computer.value = '__computer__'; select.appendChild(computer); } select.value = preferences.voice_name || ''; }
+  function populateVoices() { if (!window.AguirraVoice) return; var available = window.AguirraVoice.voices(), select = $('setting-voice-name'); wipe(select); var automatic = el('option', '', elevenReady ? 'ElevenLabs · voz natural' : 'ElevenLabs · aguardando configuração'); automatic.value = '__elevenlabs__'; select.appendChild(automatic); var browserVoice = el('option', '', 'Voz automática do aparelho'); browserVoice.value = ''; select.appendChild(browserVoice); for (var i = 0; i < available.length; i++) { var option = el('option', '', available[i].name + ' (' + available[i].lang + ')'); option.value = available[i].name; select.appendChild(option); } if (voiceServer) { var computer = el('option', '', 'Voz do meu computador (Windows)'); computer.value = '__computer__'; select.appendChild(computer); } select.value = preferences.voice_name || ''; }
   function setupVoice() {
-    var Recognition = window.SpeechRecognition || window.webkitSpeechRecognition, buttons = document.querySelectorAll('[data-mic]');
-    for (var i = 0; i < buttons.length; i++) (function (button) { if (!Recognition) { button.hidden = true; return; } button.onclick = function () { if (busy) return; var recognition; try { window.AguirraVoice.stop(); recognition = new Recognition(); recognition.lang = 'pt-BR'; recognition.continuous = false; recognition.interimResults = false; recognition.onstart = function () { button.className = 'mic-button listening'; listening = true; updateOrbState(); }; recognition.onend = function () { button.className = 'mic-button'; listening = false; updateOrbState(); }; recognition.onerror = function () { button.className = 'mic-button'; listening = false; updateOrbState(); toast('O ditado não está disponível agora. Você pode digitar sua mensagem.'); }; recognition.onresult = function (event) { listening = false; var text = event.results[0][0].transcript; $(button.getAttribute('data-mic')).value = text; send(text); }; recognition.start(); } catch (e) { toast('Este navegador não conseguiu ativar o microfone.'); } }; }(buttons[i]));
+    window.AguirraMicrophone.configure({
+      onState: function (value) { listening = value === 'listening' || value === 'requesting'; micProcessing = value === 'transcribing'; var button = document.querySelector('[data-mic]'); button.className = 'mic-button' + (listening ? ' listening' : ''); button.setAttribute('aria-pressed', listening ? 'true' : 'false'); button.setAttribute('aria-label', listening ? 'Concluir pergunta por voz' : 'Falar com o Aguirra'); $('cancel-microphone').hidden = !listening && !micProcessing; $('microphone-status').textContent = { requesting: 'Aguardando a permissão do microfone…', listening: 'Estou ouvindo. Toque no microfone para concluir.', transcribing: 'Transformando sua fala em texto…', idle: 'Toque no microfone para falar. Toque novamente para concluir.' }[value]; $('home-submit').disabled = busy || micProcessing; $('home-input').disabled = busy || micProcessing; updateOrbState(); },
+      onText: function (text) { $('home-input').value = text; }, onNotice: function (text) { $('microphone-status').textContent = text; },
+      onResult: function (text) { $('home-input').value = text; send(text); }, transcribe: function (audio, callback) { request('POST', '/api/transcribe', { audio: audio }, callback); }
+    });
+    document.querySelector('[data-mic]').onclick = function () { if (busy || micProcessing) return; if (!sessionReady) { $('microphone-status').textContent = 'Conectando ao Aguirra. Tente novamente em um instante.'; return; } window.AguirraVoice.stop(); window.AguirraMicrophone.toggle(); };
+    $('cancel-microphone').onclick = function () { window.AguirraMicrophone.cancel(); };
   }
-  var orbTimer = null, orbPhase = 0;
+  var orbTimer = null, orbPhase = 0, waveHeights = [];
   function drawOrb(phase) {
     var canvas = $('orb'), ctx = canvas.getContext && canvas.getContext('2d'); if (!ctx) return;
-    var width = canvas.width, height = canvas.height, cx = width / 2, cy = height / 2 - 5, energy = voiceActive ? .65 + orbPulse * .35 : (busy || listening ? .35 : .08), radius = 94 + Math.sin(phase * 2.8) * (2 + energy * 7), ring, i; orbPulse *= .88;
+    var width = canvas.width, height = canvas.height, cx = width / 2, cy = height / 2 - 4, count = 65, gap = 5.7;
+    var spectrum = listening ? window.AguirraMicrophone.spectrum() : window.AguirraVoice.spectrum(), energy = voiceActive ? .7 : (listening ? .5 : (busy || micProcessing || voiceLoading ? .22 : .11));
     ctx.clearRect(0, 0, width, height);
-    var glow = ctx.createRadialGradient(cx, cy, 2, cx, cy, 125); glow.addColorStop(0, 'rgba(190,150,255,' + (.19 + energy * .22) + ')' ); glow.addColorStop(.5, 'rgba(165,120,235,.025)'); glow.addColorStop(1, 'rgba(165,120,235,0)'); ctx.fillStyle = glow; ctx.fillRect(0, 0, width, height);
-    ctx.strokeStyle = 'rgba(157,127,204,.10)'; ctx.lineWidth = .6;
-    for (ring = 0; ring < 9; ring++) { ctx.beginPath(); for (i = 0; i <= 100; i++) { var angle = i / 100 * Math.PI * 2; var x = radius * Math.cos(angle), y = radius * Math.sin(angle) * Math.sin(ring * .37 + phase * .12); var rot = ring * .37 + phase * .1; var rx = x * Math.cos(rot) - y * Math.sin(rot), ry = x * Math.sin(rot) + y * Math.cos(rot); if (i === 0) ctx.moveTo(cx + rx, cy + ry); else ctx.lineTo(cx + rx, cy + ry); } ctx.stroke(); }
-    for (ring = 0; ring < 4; ring++) { ctx.strokeStyle = ring === 0 ? 'rgba(204,171,255,.60)' : 'rgba(172,135,227,.30)'; ctx.lineWidth = ring === 0 ? 1 : .7; ctx.beginPath(); var rotation = ring * 1.05 + .2 + phase * (.09 + energy * .12); for (i = 0; i <= 110; i++) { var t = i / 110 * 2 * Math.PI; var ex = Math.cos(t) * (radius + 23), ey = Math.sin(t) * (25 + ring * 9); var px = cx + ex * Math.cos(rotation) - ey * Math.sin(rotation), py = cy + ex * Math.sin(rotation) + ey * Math.cos(rotation); if (!i) ctx.moveTo(px, py); else ctx.lineTo(px, py); } ctx.stroke(); var orbit = phase * .3 + ring * 1.7, ox = Math.cos(orbit) * (radius + 23), oy = Math.sin(orbit) * (25 + ring * 9); ctx.fillStyle = '#c1a1ff'; ctx.beginPath(); ctx.arc(cx + ox * Math.cos(rotation) - oy * Math.sin(rotation), cy + ox * Math.sin(rotation) + oy * Math.cos(rotation), 2, 0, Math.PI * 2); ctx.fill(); }
-    var seed = 47; for (i = 0; i < 76; i++) { seed = (seed * 16807) % 2147483647; var theta = (seed / 2147483647) * Math.PI * 2 + phase * .08; seed = (seed * 16807) % 2147483647; var phi = Math.acos(2 * seed / 2147483647 - 1); var dx = radius * Math.sin(phi) * Math.cos(theta), dy = radius * Math.cos(phi); ctx.fillStyle = 'rgba(193,162,247,' + (.2 + .5 * (Math.sin(theta) + 1) / 2) + ')'; ctx.beginPath(); ctx.arc(cx + dx, cy + dy, i % 6 === 0 ? 1.6 : .7, 0, Math.PI * 2); ctx.fill(); }
-    ctx.fillStyle = '#d8bdff'; ctx.beginPath(); ctx.arc(cx, cy, 3 + energy * 3, 0, Math.PI * 2); ctx.fill();
+    var glow = ctx.createRadialGradient(cx, cy, 8, cx, cy, 190); glow.addColorStop(0, 'rgba(149,90,224,' + (.055 + energy * .1) + ')'); glow.addColorStop(1, 'rgba(125,70,210,0)'); ctx.fillStyle = glow; ctx.fillRect(0, 0, width, height);
+    var gradient = ctx.createLinearGradient(cx - 200, cy, cx + 200, cy); gradient.addColorStop(0, '#665081'); gradient.addColorStop(.3, '#b48ae9'); gradient.addColorStop(.5, '#e6cfff'); gradient.addColorStop(.7, '#b48ae9'); gradient.addColorStop(1, '#665081');
+    ctx.strokeStyle = gradient; ctx.lineWidth = 2.6; ctx.lineCap = 'round';
+    for (var i = 0; i < count; i++) { var position = (i - (count - 1) / 2) / ((count - 1) / 2), envelope = Math.pow(Math.max(0, 1 - position * position), 1.5), modulation = .34 + .38 * Math.pow(Math.sin(i * .23 + phase * 1.1), 2) + .28 * Math.pow(Math.cos(i * .14 - phase * .8), 2); var amplitude = spectrum ? spectrum[Math.min(spectrum.length - 1, Math.floor(i / count * spectrum.length * .65))] / 255 : energy * modulation * (.65 + orbPulse * .35); var target = 2 + envelope * (4 + amplitude * 77); waveHeights[i] = (waveHeights[i] || 2) + (target - (waveHeights[i] || 2)) * .14; var x = cx + (i - (count - 1) / 2) * gap; ctx.globalAlpha = .32 + envelope * .68; ctx.beginPath(); ctx.moveTo(x, cy - waveHeights[i]); ctx.lineTo(x, cy + waveHeights[i]); ctx.stroke(); }
+    ctx.globalAlpha = 1; orbPulse *= .93;
   }
-  function startOrb() { if (orbTimer) { clearTimeout(orbTimer); orbTimer = null; } drawOrb(orbPhase); var reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches; if (activeView !== 'home' || document.hidden || reduced || (preferences.low_power && !voiceActive && !busy && !listening)) return; orbPhase += voiceActive ? .065 : (busy ? .05 : .025); orbTimer = setTimeout(startOrb, preferences.low_power ? 140 : 50); }
+  function startOrb() { if (orbTimer) { clearTimeout(orbTimer); orbTimer = null; } drawOrb(orbPhase); var reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches; if (activeView !== 'home' || document.hidden || reduced || (preferences.low_power && !voiceActive && !voiceLoading && !busy && !listening && !micProcessing)) return; orbPhase += .045; orbTimer = setTimeout(startOrb, preferences.low_power ? 100 : 33); }
   function bind() {
     var buttons = document.querySelectorAll('[data-view],[data-open]'), i;
     for (i = 0; i < buttons.length; i++) buttons[i].onclick = function () { go(this.getAttribute('data-view') || this.getAttribute('data-open')); };
     var prompts = document.querySelectorAll('[data-prompt]'); for (i = 0; i < prompts.length; i++) prompts[i].onclick = function () { send(this.getAttribute('data-prompt')); };
-    $('home-form').onsubmit = function (event) { event.preventDefault(); send($('home-input').value); }; $('chat-form').onsubmit = function (event) { event.preventDefault(); send($('chat-input').value); };
-    $('new-conversation').onclick = freshConversation; $('fresh-response').onclick = freshConversation;
+    $('home-form').onsubmit = function (event) { event.preventDefault(); send($('home-input').value); };
     $('replay-response').onclick = function () { if (lastReply && !busy) { $('voice-hint').hidden = true; window.AguirraVoice.speak(lastReply, lastReplyId); } };
     $('stop-response').onclick = function () { window.AguirraVoice.stop(); $('orb-subtitle').textContent = lastReply; };
     $('history-search').oninput = renderHistory; $('add-memory').onclick = function () { openMemory(); };
     $('account-button').onclick = openAuth; $('settings-login').onclick = openAuth; $('close-auth').onclick = function () { closeModal('auth-modal'); }; $('close-memory').onclick = function () { closeModal('memory-modal'); };
     $('google-login').onclick = function () { if (!googleLoginReady) return; this.disabled = true; $('google-login-status').textContent = 'Conectando ao Google…'; request('POST', '/api/google', {}, function (err, result) { if (err) { $('google-login').disabled = false; $('google-login-status').textContent = err.message; return; } window.location.href = result.url; }); };
     $('toggle-auth').onclick = function () { authMode = authMode === 'login' ? 'register' : 'login'; $('auth-title').textContent = authMode === 'login' ? 'Entre no seu espaço.' : 'Crie seu espaço pessoal.'; $('auth-submit').textContent = authMode === 'login' ? 'Entrar' : 'Criar conta'; $('toggle-auth').textContent = authMode === 'login' ? 'Ainda não tenho conta ↗' : 'Já tenho uma conta ↗'; $('auth-feedback').textContent = ''; };
-    $('auth-form').onsubmit = function (event) { event.preventDefault(); $('auth-submit').disabled = true; $('auth-feedback').textContent = 'Conectando…'; request('POST', '/api/auth', { mode: authMode, email: $('auth-email').value, password: $('auth-password').value }, function (err, data) { $('auth-submit').disabled = false; $('auth-password').value = ''; if (err) { $('auth-feedback').textContent = err.message; return; } if (!data.user) { $('auth-feedback').textContent = data.message || 'Confira seu e-mail para confirmar a conta e depois entre aqui.'; return; } user = data.user; currentThread = null; closeModal('auth-modal'); loadData(); setStatus('Conta conectada'); toast('Seu espaço está conectado.'); }); };
-    $('logout-button').onclick = function () { request('POST', '/api/logout', {}, function (err) { if (err) { toast(err.message); return; } user = null; currentThread = null; state = readJSON(storageKey, empty()); closeModal('auth-modal'); render(); setStatus('Neste aparelho'); }); };
+    $('auth-form').onsubmit = function (event) { event.preventDefault(); $('auth-submit').disabled = true; $('auth-feedback').textContent = 'Conectando…'; request('POST', '/api/auth', { mode: authMode, email: $('auth-email').value, password: $('auth-password').value }, function (err, data) { $('auth-submit').disabled = false; $('auth-password').value = ''; if (err) { $('auth-feedback').textContent = err.message; return; } if (!data.user) { $('auth-feedback').textContent = data.message || 'Confira seu e-mail para confirmar a conta e depois entre aqui.'; return; } user = data.user; window.AguirraVoice.stop(); window.AguirraVoice.clearCache(); $('orb-response').hidden = true; closeModal('auth-modal'); loadData(); setStatus('Conta conectada'); toast('Seu espaço está conectado.'); }); };
+    $('logout-button').onclick = function () { request('POST', '/api/logout', {}, function (err) { if (err) { toast(err.message); return; } user = null; window.AguirraVoice.stop(); window.AguirraVoice.clearCache(); $('orb-response').hidden = true; state = readJSON(storageKey, empty()); closeModal('auth-modal'); render(); setStatus('Neste aparelho'); }); };
     $('memory-form').onsubmit = function (event) { event.preventDefault(); var content = $('memory-content').value.trim(); if (!content) return; if (M.sensitive(content)) { $('memory-feedback').textContent = 'Guarde preferências e objetivos. Credenciais e informações sensíveis não entram no núcleo.'; return; } var m = { category: $('memory-category').value, content: content, key: M.normalize(content).slice(0, 100), origin: 'manual' }; if (!user) { if (editingMemory) { var old = state.memories.filter(function (x) { return x.id === editingMemory; })[0]; if (old) m.key = old.key; } putLocalMemory(m); saveLocal(); render(); closeModal('memory-modal'); toast('Conexão guardada no seu núcleo.'); return; } request('POST', '/api/memory', { id: editingMemory, category: m.category, content: m.content }, function (err) { if (err) { $('memory-feedback').textContent = err.message; return; } closeModal('memory-modal'); loadData(); toast('Memória sincronizada.'); }); };
     $('setting-low-power').onchange = function () { preferences.low_power = this.checked; savePreferences(); renderSettings(); startOrb(); }; $('power-shortcut').onclick = function () { preferences.low_power = !preferences.low_power; savePreferences(); renderSettings(); startOrb(); toast(preferences.low_power ? 'Modo econômico ativado.' : 'Animação ativada.'); };
     $('setting-voice').onchange = function () { preferences.voice = this.checked; savePreferences(); if (!this.checked) window.AguirraVoice.stop(); };
@@ -233,9 +222,9 @@
     $('stop-voice').onclick = function () { window.AguirraVoice.stop(); };
     $('sync-local').onclick = function () { var local = readJSON(storageKey, empty()); if (!local.memories.length) return; request('POST', '/api/import', { memories: local.memories.map(function (m) { return { category: m.category, content: m.content }; }) }, function (err) { if (err) toast(err.message); else { loadData(); toast('Memórias importadas. O histórico local permanece neste aparelho.'); } }); };
     $('export-data').onclick = function () { var data = JSON.stringify({ format: 'aguirra-export-v1', exported_at: new Date().toISOString(), data: state }, null, 2), url; try { var blob = new Blob([data], { type: 'application/json' }); url = (window.URL || window.webkitURL).createObjectURL(blob); var a = el('a', '', 'Baixar dados'); a.href = url; a.download = 'aguirra-meus-dados.json'; document.body.appendChild(a); a.click(); document.body.removeChild(a); setTimeout(function () { (window.URL || window.webkitURL).revokeObjectURL(url); }, 20000); } catch (e) { var exportWindow = window.open('', '_blank'); if (exportWindow) { exportWindow.document.body.appendChild(exportWindow.document.createElement('pre')).textContent = data; } else toast('Seu navegador bloqueou a exportação. Tente pelo computador.'); } };
-    $('clear-data').onclick = function () { if (busy) { toast('Aguarde a resposta antes de apagar os dados.'); return; } if (!window.confirm('Apagar todo o histórico, assuntos e memórias' + (user ? ' da sua conta em todos os aparelhos' : ' deste aparelho') + '? Essa ação não pode ser desfeita.')) return; if (!user) { state = empty(); currentThread = null; saveLocal(); render(); toast('Seu núcleo foi limpo.'); return; } request('DELETE', '/api/data', null, function (err) { if (err) toast(err.message); else { currentThread = null; loadData(); toast('Histórico e núcleo apagados da sua conta.'); } }); };
+    $('clear-data').onclick = function () { if (busy) { toast('Aguarde a resposta antes de apagar os dados.'); return; } if (!window.confirm('Apagar todo o histórico, assuntos e memórias' + (user ? ' da sua conta em todos os aparelhos' : ' deste aparelho') + '? Essa ação não pode ser desfeita.')) return; if (!user) { state = empty(); saveLocal(); render(); toast('Seu núcleo foi limpo.'); return; } request('DELETE', '/api/data', null, function (err) { if (err) toast(err.message); else { loadData(); toast('Histórico e núcleo apagados da sua conta.'); } }); };
     $('fullscreen-button').onclick = function () { var root = document.documentElement, enter = root.requestFullscreen || root.webkitRequestFullscreen || root.mozRequestFullScreen; var exit = document.exitFullscreen || document.webkitExitFullscreen || document.mozCancelFullScreen; if (document.fullscreenElement || document.webkitFullscreenElement) { if (exit) exit.call(document); } else if (enter) { var p = enter.call(root); if (p && p.catch) p.catch(function () { toast('O navegador não permitiu a tela cheia.'); }); } else toast('Este navegador não oferece tela cheia.'); };
-    document.addEventListener('visibilitychange', startOrb);
+    document.addEventListener('visibilitychange', function () { if (document.hidden) window.AguirraMicrophone.cancel(); startOrb(); });
     document.addEventListener('keydown', function (event) { if (event.keyCode === 27) { closeModal('auth-modal'); closeModal('memory-modal'); } var modal = !$('auth-modal').hidden ? $('auth-modal') : (!$('memory-modal').hidden ? $('memory-modal') : null); if (event.keyCode !== 9 || !modal) return; var all = modal.querySelectorAll('button,input,textarea,select'), nodes = [], k; for (k = 0; k < all.length; k++) if (!all[k].hidden && all[k].offsetWidth > 0) nodes.push(all[k]); if (!nodes.length) return; if (event.shiftKey && document.activeElement === nodes[0]) { event.preventDefault(); nodes[nodes.length - 1].focus(); } else if (!event.shiftKey && document.activeElement === nodes[nodes.length - 1]) { event.preventDefault(); nodes[0].focus(); } });
   }
   function setStatus(text) { wipe($('connection-status')); $('connection-status').appendChild(el('i')); $('connection-status').appendChild(document.createTextNode(text)); }
@@ -243,12 +232,12 @@
   window.AguirraVoice.configure({ voice: preferences.voice_name,
     onStatus: function (text) { $('voice-status').textContent = text; },
     onNotice: function (text) { $('voice-status').textContent = text; $('voice-hint').textContent = text; $('voice-hint').hidden = false; },
-    onState: function (value) { voiceActive = value === 'speaking'; updateOrbState(); if (value !== 'speaking' && lastReply) $('orb-subtitle').textContent = lastReply; },
+    onState: function (value) { voiceActive = value === 'speaking'; voiceLoading = value === 'loading'; updateOrbState(); if (value !== 'speaking' && value !== 'loading' && lastReply) $('orb-subtitle').textContent = lastReply; },
     onCaption: function (text) { $('orb-subtitle').textContent = text; }, onPulse: function () { orbPulse = 1; }
   });
   bind(); setupVoice(); tick(); setInterval(tick, 15000); render(); startOrb();
   if (window.speechSynthesis) window.speechSynthesis.onvoiceschanged = populateVoices;
   if (/[?&]auth=google-failed(?:&|$)/.test(window.location.search)) { toast('Não foi possível concluir a entrada com Google. Tente novamente.'); if (window.history && window.history.replaceState) window.history.replaceState(null, '', '/'); }
-  $('voice-status').textContent = 'Leitura automática ativada. Escolha uma voz ou toque em Testar voz.';
-  request('GET', '/api/session', null, function (err, data) { sessionReady = true; if (err) { setStatus('Neste aparelho'); $('server-capabilities').textContent = 'Servidor indisponível. Memória local, mapa e histórico continuam funcionando.'; return; } user = data.user || null; localApi = !!data.local; voiceServer = !!data.tts_server; googleLoginReady = !!data.google_login; setStatus(user ? (localApi ? 'Computador conectado' : 'Conta conectada') : 'Neste aparelho'); $('server-capabilities').textContent = 'Perguntas sem conta. ' + (data.google_ready ? 'Conversa com Gemini gratuito. Fontes públicas por Wikipedia e notícias RSS. A pesquisa integrada do Google está desativada.' : (localApi ? 'IA local com Ollama. ' : 'Conversa gratuita ainda indisponível. ') + 'Manchetes disponíveis por RSS; isso não é uma pesquisa completa na web.'); if (user) loadData(); else render(); });
+  $('voice-status').textContent = 'Escolha ElevenLabs para a voz natural ou uma voz do aparelho como alternativa.';
+  request('GET', '/api/session', null, function (err, data) { sessionReady = true; if (err) { setStatus('Neste aparelho'); $('server-capabilities').textContent = 'Servidor indisponível. Memória local, mapa e histórico continuam funcionando.'; return; } user = data.user || null; localApi = !!data.local; voiceServer = !!data.tts_server; elevenReady = !!data.elevenlabs_ready; window.AguirraMicrophone.setServer(!!data.transcription_ready); $('elevenlabs-status').textContent = elevenReady ? 'ElevenLabs disponível. A geração só é liberada no plano Free, sem excedentes.' : 'ElevenLabs aguarda a chave no servidor. Até lá, a voz do aparelho é usada como alternativa.'; googleLoginReady = !!data.google_login; setStatus(user ? (localApi ? 'Computador conectado' : 'Conta conectada') : 'Neste aparelho'); $('server-capabilities').textContent = 'Perguntas sem conta. ' + (data.google_ready ? 'Conversa com Gemini gratuito. Fontes públicas por Wikipedia e notícias RSS. A pesquisa integrada do Google está desativada.' : (localApi ? 'IA local com Ollama. ' : 'Conversa gratuita ainda indisponível. ') + 'Manchetes disponíveis por RSS; isso não é uma pesquisa completa na web.'); if (user) loadData(); else render(); });
 }());
