@@ -36,7 +36,7 @@
       recognition.onstart = function () { if (run === generation) { state('listening'); timer = root.setTimeout(function () { if (recognition) recognition.stop(); }, 25000); } };
       recognition.onresult = function (event) { if (run !== generation) return; var interim = ''; finalText = ''; for (var i = 0; i < event.results.length; i++) { var text = event.results[i][0].transcript; if (event.results[i].isFinal) finalText += text + ' '; else interim += text; } onText((finalText + interim).trim()); };
       recognition.onerror = function (event) { if (run !== generation || event.error === 'aborted') return; failed = true; active = false; recognition = null; if (timer) root.clearTimeout(timer); state('idle'); if (server && /network|service-not-allowed/.test(event.error)) { useRecorder = true; onNotice('O reconhecimento do navegador falhou. Toque novamente para gravar e transcrever com ElevenLabs.'); } else onNotice(problem(event)); };
-      recognition.onend = function () { if (run !== generation) return; active = false; recognition = null; if (timer) root.clearTimeout(timer); state('idle'); if (!failed && finalText.trim()) onResult(finalText.trim()); else if (!failed) onNotice('Não identifiquei uma pergunta. Toque no microfone e fale novamente.'); };
+      recognition.onend = function () { if (run !== generation || failed) return; active = false; recognition = null; if (timer) root.clearTimeout(timer); state('idle'); if (!failed && finalText.trim()) onResult(finalText.trim()); else if (!failed) onNotice('Não identifiquei uma pergunta. Toque no microfone e fale novamente.'); };
       recognition.start();
     } catch (error) { active = false; recognition = null; state('idle'); onNotice(problem(error)); }
   }

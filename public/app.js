@@ -101,7 +101,8 @@
     for (var i = state.messages.length - 1; i >= 0; i--) {
       var question = state.messages[i]; if (question.role !== 'user') continue;
       var response = null;
-      for (var j = i + 1; j < state.messages.length; j++) { if (state.messages[j].role === 'user') break; if (state.messages[j].role === 'assistant') { response = state.messages[j]; break; } }
+      if (question.reply_id) { for (var r = 0; r < state.messages.length; r++) if (state.messages[r].id === question.reply_id) response = state.messages[r]; }
+      if (!response) for (var j = i + 1; j < state.messages.length; j++) { if (state.messages[j].thread_id !== question.thread_id) continue; if (state.messages[j].role === 'user') break; if (state.messages[j].role === 'assistant') { response = state.messages[j]; break; } }
       if (query && M.normalize(question.content + ' ' + (response ? response.content : '')).indexOf(query) === -1) continue;
       found++;
       (function (q, r) { var card = el('button', 'history-card'); card.appendChild(el('span', 'section-label', localDate(q.created_at) + ' · ' + localDate(q.created_at, true))); card.appendChild(el('h3', '', q.content)); card.appendChild(el('p', '', r ? window.AguirraVoice.cleanText(r.content).slice(0, 180) : 'Pergunta registrada.')); card.onclick = function () { if (busy || micProcessing) { toast('Aguarde a resposta atual.'); return; } window.AguirraVoice.stop(); go('home'); $('last-question').textContent = q.content; presentResponse(r ? r.content : 'Esta pergunta foi registrada, mas não tem uma resposta salva.', r, q.content); }; list.appendChild(card); }(question, response));
@@ -167,7 +168,7 @@
   function presentResponse(text, record, questionText) {
     lastReply = window.AguirraVoice.cleanText(text);
     var messages = state.messages, response = record || null, i;
-    for (i = messages.length - 1; i >= 0; i--) { if (!response && messages[i].role === 'assistant') response = messages[i]; if (messages[i].role === 'user') { $('last-question').textContent = questionText || messages[i].content; break; } }
+    for (i = messages.length - 1; i >= 0; i--) { if (!response && !questionText && messages[i].role === 'assistant') response = messages[i]; if (messages[i].role === 'user') { $('last-question').textContent = questionText || messages[i].content; break; } }
     lastReplyId = user && response ? response.id : null;
     $('orb-response').hidden = false; $('replay-response').disabled = false;
     document.querySelector('.home-center').className = 'home-center is-conversing';

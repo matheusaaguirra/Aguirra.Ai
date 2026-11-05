@@ -38,3 +38,5 @@ Referências oficiais:
 - https://elevenlabs.io/docs/api-reference/text-to-speech/convert-with-timestamps/
 - https://elevenlabs.io/docs/api-reference/speech-to-text/convert
 - https://elevenlabs.io/pricing/api
+
+Produção: o deploy `dpl_CVWNjUWCD47x7caG3Z54XuGg19g6` ficou READY em https://aguirra-ai.vercel.app/. Uma pergunta real sobre som retornou resposta coerente pela rota `/api/ask`; outra pergunta de horário apareceu separadamente no histórico, e a primeira foi reaberta na Central. A tela confirmou ElevenLabs aguardando configuração. Em HTTPS, o botão do microfone entrou na etapa de solicitar permissão e ofereceu cancelar; não houve captura física validada. A mensagem de erro foi ajustada para permanecer visível após o encerramento do reconhecimento. Políticas de propriedade e restrições das tabelas existentes foram conferidas por consultas de metadados no Supabase; não houve alteração de schema ou RLS.
