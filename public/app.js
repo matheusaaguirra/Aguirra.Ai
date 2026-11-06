@@ -43,7 +43,7 @@
   function tick() { var d = new Date(), months = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro']; $('clock-label').textContent = localDate(d, true); $('date-label').textContent = d.getDate() + ' de ' + months[d.getMonth()] + ', ' + d.getFullYear(); }
   function render() {
     var points = A.pairs(state.messages), count = state.memories.length + points.length;
-    $('home-memory-count').textContent = pad(count); $('nav-memory-count').textContent = String(count);
+    $('home-memory-count').textContent = pad(G.memoryCount(points)); $('nav-memory-count').textContent = String(count);
     var answerCount = G.memoryCount(points);
     G.draw($('mini-brain'), G.network(points.slice(-50),state.memories.slice(0,12)), null, null, true);
     $('context-description').textContent = points.length + (points.length === 1 ? ' pergunta' : ' perguntas') + ' · ' + answerCount + (answerCount === 1 ? ' memória de resposta' : ' memórias de resposta') + (state.memories.length ? ' · '+state.memories.length+' notas pessoais' : '');
@@ -106,7 +106,7 @@
   function renderQuestionMap() {
     var all = A.pairs(state.messages).reverse(), query = M.normalize($('question-search').value), list = all.filter(function (p) { return (!graphTopic || G.subject(p.question.content)===graphTopic) && (!query || M.normalize(p.question.content+' '+(p.answer ? p.answer.content : '')).indexOf(query)!==-1); });
     var totalPages = Math.max(1, Math.ceil(list.length / 60)); questionPage = Math.max(0, Math.min(questionPage, totalPages - 1));
-    $('brain-summary').textContent = all.length+' perguntas · '+G.memoryCount(all)+' memórias de resposta · '+state.memories.length+' notas pessoais';
+    $('brain-summary').textContent = all.length+(all.length===1?' pergunta · ':' perguntas · ')+G.memoryCount(all)+(G.memoryCount(all)===1?' memória de resposta · ':' memórias de resposta · ')+state.memories.length+(state.memories.length===1?' nota pessoal':' notas pessoais');
     var pages=$('question-pages'), svg=$('brain-svg'), index=$('question-list'), i;
     wipe(pages); wipe(index);
     function action(label,fn){var btn=el('button','quiet-button',label);btn.type='button';btn.onclick=fn;pages.appendChild(btn);return btn;}
@@ -140,11 +140,11 @@
     renderQuestionMap();
     var cats = ['profile', 'preferences', 'goals', 'projects', 'notes'], i;
     var filters = $('memory-filters'); wipe(filters); var allCats = ['all'].concat(cats);
-    for (i = 0; i < allCats.length; i++) (function (cat) { var b = el('button', 'filter-button' + (memoryFilter === cat ? ' selected' : ''), cat === 'all' ? 'Todas as conexões' : M.categories[cat]); b.onclick = function () { memoryFilter = cat; renderBrain(); }; filters.appendChild(b); }(allCats[i]));
+    for (i = 0; i < allCats.length; i++) (function (cat) { var b = el('button', 'filter-button' + (memoryFilter === cat ? ' selected' : ''), cat === 'all' ? 'Todas as notas' : M.categories[cat]); b.onclick = function () { memoryFilter = cat; renderBrain(); }; filters.appendChild(b); }(allCats[i]));
     var list = $('memory-list'); wipe(list); var items = state.memories.filter(function (m) { return memoryFilter === 'all' || m.category === memoryFilter; });
-    if (!items.length) { var emptyState = el('div', 'empty-state'); emptyState.appendChild(el('strong', '', 'Todo contexto começa pequeno.')); emptyState.appendChild(el('span', '', 'Conte uma preferência ou toque em “Guardar uma memória”. Seu mapa cresce a partir de informações reais.')); list.appendChild(emptyState); }
+    if (!items.length) { var emptyState = el('div', 'empty-state'); emptyState.appendChild(el('strong', '', 'Nenhuma nota pessoal nesta seleção.')); emptyState.appendChild(el('span', '', 'Guarde uma preferência ou um objetivo para personalizar respostas futuras.')); list.appendChild(emptyState); }
     for (i = 0; i < items.length; i++) (function (m) { var card = el('article', 'memory-card'); card.appendChild(el('span', 'section-label', M.categories[m.category] || 'Anotações')); card.appendChild(el('p', '', m.content)); card.appendChild(el('div', 'memory-meta', (m.origin === 'declared' ? 'DECLARADO POR VOCÊ' : 'GUARDADO POR VOCÊ') + ' · ' + localDate(m.updated_at))); var actions = el('div', 'memory-actions'), edit = el('button', '', 'Editar'), remove = el('button', '', 'Esquecer'); edit.onclick = function () { openMemory(m); }; remove.onclick = function () { deleteMemory(m); }; actions.appendChild(edit); actions.appendChild(remove); card.appendChild(actions); list.appendChild(card); }(items[i]));
-    var topics = $('topic-list'); wipe(topics); var sorted = state.topics.slice().sort(function (a, b) { return b.count - a.count; });
+    var topics = $('topic-list'); wipe(topics); var subjectTotals=Object.create(null); A.pairs(state.messages).forEach(function(p){var subject=G.subject(p.question.content);subjectTotals[subject]=(subjectTotals[subject]||0)+1;}); var sorted = Object.keys(subjectTotals).map(function(name){return {name:name,count:subjectTotals[name]};}).sort(function (a, b) { return b.count - a.count; });
     if (!sorted.length) topics.appendChild(el('p', '', 'Os assuntos aparecerão conforme você conversar.'));
     for (i = 0; i < sorted.length; i++) topics.appendChild(el('span', 'topic-chip', sorted[i].name + ' · ' + sorted[i].count));
   }
