@@ -10,3 +10,6 @@ dist
 .DS_Store
 *.tsbuildinfo
 .aguirra
+
+# Supabase CLI runtime metadata
+supabase/.temp/
