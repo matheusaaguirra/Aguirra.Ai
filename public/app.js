@@ -60,6 +60,7 @@
     if (index >= 0) { var previous = state.memories[index]; if (previous.source_message_id && previous.source_message_id !== messageId) excludeLocalMemory(previous); state.memories.splice(index, 1); } state.memories.unshift(m);
   }
   function localAnswer(text, learned) {
+    var identity = M.identityAnswer(text); if (identity) return identity;
     var kind = M.intent(text);
     if (kind === 'clock') return 'Agora são ' + localDate(new Date(), true) + ' de ' + localDate() + ', pelo relógio e fuso deste aparelho.';
     if (learned.length) return 'Guardei no seu núcleo: ' + learned.map(function (m) { return m.content; }).join('; ') + '. Você pode revisar essa memória no Mapa cerebral.';
@@ -87,11 +88,12 @@
       if (err) {
         addMessage('assistant', err.message, true); toast(err.message);
         if (guest) { saveLocal(); render(); speak(err.message); }
-        else loadData(function () { speak(err.message); });
+        else { speak(err.message, { id: null }); loadData(); }
         return;
       }
       if (guest) { var reply = addMessage('assistant', result.reply); pending.reply_id = reply.id; reply.sources = result.sources || []; reply.search_entry_point = result.search_entry_point || null; reply.mode = result.mode; saveLocal(); render(); speak(result.reply); return; }
-      loadData(function () { if (result.learned) toast('Nova conexão guardada no seu núcleo.'); speak(result.reply); });
+      speak(result.reply, { id: result.answer_id || null });
+      loadData(function () { if (result.learned) toast('Nova conexão guardada no seu núcleo.'); });
     });
   }
   function setBusy(value) { busy = value; $('home-submit').disabled = value; $('home-input').disabled = value; if (value) hideCaption(); updateOrbState(); }
@@ -184,7 +186,7 @@
     hideCaption(); $('voice-hint').hidden = true;
     if (!preferences.voice) { $('voice-hint').textContent = 'Resposta salva no Histórico.'; $('voice-hint').hidden = false; }
   }
-  function speak(text) { presentResponse(text); if (preferences.voice) window.AguirraVoice.speak(lastReply, lastReplyId); }
+  function speak(text, record) { presentResponse(text, record); if (preferences.voice) window.AguirraVoice.speak(lastReply, lastReplyId); }
   function populateVoices() { if (!window.AguirraVoice) return; var available = window.AguirraVoice.voices(), select = $('setting-voice-name'); wipe(select); var automatic = el('option', '', elevenReady ? 'ElevenLabs · voz natural' : 'ElevenLabs · aguardando configuração'); automatic.value = '__elevenlabs__'; select.appendChild(automatic); var browserVoice = el('option', '', 'Voz automática do aparelho'); browserVoice.value = ''; select.appendChild(browserVoice); for (var i = 0; i < available.length; i++) { var option = el('option', '', available[i].name + ' (' + available[i].lang + ')'); option.value = available[i].name; select.appendChild(option); } if (voiceServer) { var computer = el('option', '', 'Voz do meu computador (Windows)'); computer.value = '__computer__'; select.appendChild(computer); } select.value = preferences.voice_name || ''; }
   function setupVoice() {
     window.AguirraMicrophone.configure({

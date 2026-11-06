@@ -6,7 +6,7 @@ import { categories, extract, normalize, redact, relevant, sensitive, topics, ty
 import { localLogout, localMode } from "../lib/local-store.ts";
 import { answerQuestion, guestInput, guestContext, guestLearned } from "../lib/answers.ts";
 import { googleReady } from "../lib/google.ts";
-import { intent } from "../lib/questions.ts";
+import { intent, identityAnswer } from "../lib/questions.ts";
 import { claimPublicBudget } from "../lib/public-budget.ts";
 import { googleLoginAvailable, startGoogleLogin, completeGoogleLogin } from "../lib/google-login.ts";
 import { assistantLog, assistantHistory } from "../lib/assistant-log.ts";
@@ -51,12 +51,14 @@ async function chat(request: Request, args: RouteHandlerArgs, session: Session) 
   if (!quota) throw new AppError(429, "Seu limite desta hora foi atingido. Aguarde antes de enviar novas perguntas.");
   const message = redact(input.message), threadId = await assistantLog(session);
   await db(session, "aguirra_messages", "POST", { id: input.request_id, user_id: session.user.id, thread_id: threadId, role: "user", content: message });
-  const data = await loadData(session), learned = data.settings.memory_enabled === false ? [] : extract(message);
+  // Identity needs no memories or past replies, but remains recorded in the same history.
+  const directIdentity = identityAnswer(message);
+  const data = directIdentity ? null : await loadData(session), learned = !data || data.settings.memory_enabled === false ? [] : extract(message);
   for (const memory of learned) await db(session, "aguirra_memories?on_conflict=user_id,key", "POST", { user_id: session.user.id, ...memory, source_message_id: input.request_id, updated_at: new Date().toISOString() }, "resolution=merge-duplicates,return=representation");
-  for (const name of topics(message)) await db(session, "rpc/aguirra_touch_topic", "POST", { topic_name: name });
-  const allMemories: Memory[] = await db(session, "aguirra_memories?select=*&order=updated_at.desc&limit=500");
+  for (const name of directIdentity ? [] : topics(message)) await db(session, "rpc/aguirra_touch_topic", "POST", { topic_name: name });
+  const allMemories: Memory[] = !data ? [] : learned.length ? await db(session, "aguirra_memories?select=*&order=updated_at.desc&limit=500") : data.memories;
   const context = intent(message) === "memory" ? allMemories.slice(0, 50) : relevant(allMemories, message);
-  const previous = assistantHistory(data.messages, input.request_id);
+  const previous = data ? assistantHistory(data.messages, input.request_id) : [];
   try {
     const { reply, sources, search_entry_point, mode } = await answerQuestion(message, { history: previous, memories: context.map(m => ({ category: m.category, content: m.content })) }, learned);
     const replyId = randomUUID();

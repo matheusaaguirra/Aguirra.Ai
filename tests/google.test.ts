@@ -16,7 +16,7 @@ test('Free chat uses the supported fixed model without any paid Google Search to
     process.env.GOOGLE_GENERATIVE_AI_API_KEY = 'disposable-test-key'; delete process.env.AGUIRRA_GOOGLE_FREE_CHAT;
     globalThis.fetch = async (request, options) => {
       calls++; assert.match(String(request), new RegExp(GOOGLE_MODEL));
-      const body = JSON.parse(String(options?.body)); assert.ok(!body.tools?.length); assert.equal(body.generationConfig.responseMimeType, 'application/json');
+      const body = JSON.parse(String(options?.body)); assert.ok(!body.tools?.length); assert.equal(body.generationConfig.thinkingConfig.thinkingLevel, 'minimal'); assert.match(JSON.stringify(body.systemInstruction), /Matheus Almeida Guirra/); assert.match(JSON.stringify(body.systemInstruction), /modelos de terceiros/); assert.equal(body.generationConfig.responseMimeType, 'application/json');
       return Response.json({ candidates: [{ content: { role: 'model', parts: [{ text: JSON.stringify({ answer: 'RAM é memória de acesso aleatório.', source_ids: [1] }) }] }, finishReason: 'STOP' }], usageMetadata: { promptTokenCount: 12, candidatesTokenCount: 20, totalTokenCount: 32 }, modelVersion: GOOGLE_MODEL });
     };
     assert.equal(googleReady(), false); await assert.rejects(respondGoogle('teste', { history: [], memories: [] })); assert.equal(calls, 0);

@@ -1,6 +1,12 @@
 import { normalize } from './memory.ts';
 export interface Document { title: string; url: string; content: string; }
 const cache = new Map<string, { expires: number; documents: Document[] }>();
+function remember(query: string, documents: Document[]) {
+  if (cache.size >= 100) cache.clear();
+  // Briefly cache failures too, so a slow source cannot stall every repeated question.
+  cache.set(query, { expires: Date.now() + (documents.length ? 300000 : 30000), documents });
+  return documents;
+}
 export function needsCurrent(message: string) { return /\b(hoje|agora|atual|atualmente|cotacao|preco|clima|cambio|dolar|presidente|eleicoes|resultado)\b|ultim[oa]s?\b/.test(normalize(message)); }
 export function knowledgeQuery(message: string) {
   if (!/^(o que (e|sao|significa)|quem (e|foi)|qual (e )?a capital|explique|como funciona)/.test(normalize(message))) return null;
@@ -17,11 +23,11 @@ export async function readKnowledge(message: string): Promise<Document[]> {
   const url = new URL('https://pt.wikipedia.org/w/api.php');
   url.search = new URLSearchParams({ action: 'query', generator: 'search', gsrsearch: query, gsrlimit: '3', prop: 'extracts|info', exintro: '1', explaintext: '1', exlimit: '3', inprop: 'url', format: 'json' }).toString();
   try {
-    const response = await fetch(url, { headers: { 'User-Agent': 'Aguirra/1.0 (https://github.com/matheusaaguirra/Aguirra.Ai)', Accept: 'application/json' }, signal: AbortSignal.timeout(8000) });
-    if (!response.ok) return [];
-    const raw = await response.text(); if (raw.length > 1000000) return [];
+    const response = await fetch(url, { headers: { 'User-Agent': 'Aguirra/1.0 (https://github.com/matheusaaguirra/Aguirra.Ai)', Accept: 'application/json' }, signal: AbortSignal.timeout(2500) });
+    if (!response.ok) return remember(query, []);
+    const raw = await response.text(); if (raw.length > 1000000) return remember(query, []);
     const terms = normalize(query).split(/\W+/).filter(w => w.length > 2 && !['que', 'uma', 'das', 'dos', 'como'].includes(w));
     const documents = parseKnowledge(JSON.parse(raw)).filter(d => terms.some(w => normalize(d.title).includes(w)));
-    if (cache.size > 100) cache.clear(); cache.set(query, { expires: Date.now() + 300000, documents }); return documents;
-  } catch { return []; }
+    return remember(query, documents);
+  } catch { return remember(query, []); }
 }

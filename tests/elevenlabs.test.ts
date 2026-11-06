@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {checkFreePlan, elevenReady, elevenSpeech, elevenTranscribe, validateRecording, ELEVEN_MODEL} from '../agent/lib/elevenlabs.ts';
+import {checkFreePlan, elevenReady, elevenSpeech, elevenTranscribe, validateRecording, ELEVEN_MODEL, ELEVEN_NUMERIC_MODEL} from '../agent/lib/elevenlabs.ts';
 const free = {tier:'free', can_extend_character_limit:false, max_credit_limit_extension:0, character_count:0, character_limit:10000};
 function wave(seconds = 1) {const b = Buffer.alloc(44+seconds*32000); b.write('RIFF'); b.writeUInt32LE(b.length-8,4); b.write('WAVE',8); b.write('fmt ',12); b.writeUInt32LE(16,16); b.writeUInt16LE(1,20); b.writeUInt16LE(1,22); b.writeUInt32LE(16000,24); b.writeUInt32LE(32000,28); b.writeUInt16LE(2,32); b.writeUInt16LE(16,34); b.write('data',36); b.writeUInt32LE(b.length-44,40); return b.toString('base64');}
 test('ElevenLabs only generates on a verified Free plan without overages; errors never trigger paid retries', async () => {
@@ -22,4 +22,20 @@ test('Voice recording bounds and format are validated before upload, then Scribe
     assert.equal(await elevenTranscribe(wave()),'Qual é a data de hoje?');assert.equal(calls,2);
     await assert.rejects(elevenTranscribe('bad'),/20 segundos|WAV/);assert.equal(calls,2);
   }finally{globalThis.fetch=fetch;if(key===undefined)delete process.env.ELEVENLABS_API_KEY;else process.env.ELEVENLABS_API_KEY=key;}
+});
+
+test('Conversational speech uses fast Portuguese synthesis while dates retain free number normalization', async () => {
+  const fetch = globalThis.fetch, key = process.env.ELEVENLABS_API_KEY; const bodies: any[] = [];
+  try {
+    process.env.ELEVENLABS_API_KEY = 'disposable';
+    globalThis.fetch = async (url, options) => {
+      if (String(url).endsWith('/user/subscription')) return Response.json(free);
+      bodies.push(JSON.parse(String(options?.body))); return Response.json({ audio_base64: 'SUQz' });
+    };
+    await elevenSpeech('Sou o Aguirra, seu assistente pessoal.');
+    await elevenSpeech('Hoje é 6 de novembro de 2026, às 14:30.');
+    assert.equal(bodies[0].model_id, ELEVEN_MODEL); assert.equal(bodies[0].language_code, 'pt');
+    assert.equal(bodies[1].model_id, ELEVEN_NUMERIC_MODEL);
+    for (const body of bodies) assert.equal(body.apply_text_normalization, undefined, 'Never request Enterprise-only normalization');
+  } finally { globalThis.fetch = fetch; if (key === undefined) delete process.env.ELEVENLABS_API_KEY; else process.env.ELEVENLABS_API_KEY = key; }
 });
