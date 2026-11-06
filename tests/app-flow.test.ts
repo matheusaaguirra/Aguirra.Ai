@@ -34,10 +34,11 @@ function app(signedIn = true) {
   context.window = context;
   vm.runInNewContext(readFileSync('public/memory-core.js', 'utf8'), context);
   vm.runInNewContext(readFileSync('public/answer-cache.js', 'utf8'), context);
+  vm.runInNewContext(readFileSync('public/graph.js', 'utf8'), context);
   vm.runInNewContext(readFileSync('public/app.js', 'utf8'), context);
   const data = { memories: [], threads: [], messages: [], topics: [], settings: { memory_enabled: true } };
   requests.shift().respond({ user: signedIn ? { id: 'owner', email: 'test@example.com' } : null, elevenlabs_ready: true });
-  if (signedIn) requests.shift().respond(data);
+  requests.shift().respond(data);
   return { nodes, spoken, requests, data, openBrain() { (brainNav as any).onclick(); }, send(text: string) { element('home-input').value = text; element('home-form').onsubmit({ preventDefault() {} }); } };
 }
 test('Signed-in identity speaks before history persistence and is never spoken twice', () => {
@@ -60,15 +61,6 @@ test('Generated answers start speaking before data refresh and failed identity s
   assert.equal(page.spoken.length, 2); assert.match(page.nodes.get('toast').textContent, /registro desta pergunta/);
 });
 
-test('A guest repeats and rephrases saved questions without any new answer request; refresh bypasses reuse', () => {
-  const page = app(false); page.send('O que é memória RAM?');
-  assert.equal(page.requests.length, 1);
-  page.requests.shift().respond({ reply: 'RAM guarda dados temporariamente.', mode: 'google_ai', sources: [] });
-  page.send('Me explique RAM');
-  assert.equal(page.requests.length, 0); assert.equal(page.spoken.length, 2);
-  assert.equal(page.spoken[1].text, 'RAM guarda dados temporariamente.');
-  page.send('Para que serve RAM?'); assert.equal(page.requests.length, 1, 'Different intent must generate a new answer');
-});
 test('Signed-in answer memory speaks immediately while its new question is recorded', () => {
   const page = app(), text = 'RAM guarda dados temporariamente.'; page.send('O que é memória RAM?');
   const request = page.requests.shift(), questionId = request.body.request_id;
@@ -85,9 +77,16 @@ test('Signed-in answer memory speaks immediately while its new question is recor
 test('The brain renders one point per question and lets the user explicitly refresh a saved answer', () => {
   const page = app(false); page.send('O que é RAM?');
   page.requests.shift().respond({ reply: 'RAM guarda dados temporariamente.', mode: 'google_ai' });
-  page.send('Me explique memória RAM'); page.openBrain();
+  const meta=answers.makeMeta('O que é RAM?','RAM guarda dados temporariamente.','google_ai',[],true);
+  page.data.messages.push({id:'q1',role:'user',content:'O que é RAM?',reply_id:'a1'} as never,{id:'a1',role:'assistant',content:'RAM guarda dados temporariamente.',cache_meta:meta} as never);
+  page.requests.shift().respond(page.data);
+  page.send('Me explique memória RAM');
+  assert.equal(page.requests[0].path,'/api/ask','visitors also persist every question in the cloud');
+  page.requests.shift().respond({reply:'RAM guarda dados temporariamente.',cached:true});
+  page.data.messages.push({id:'q2',role:'user',content:'Me explique memória RAM',reply_id:'a2'} as never,{id:'a2',role:'assistant',content:'RAM guarda dados temporariamente.',cache_meta:{...meta,reused_from:'q1'}} as never);
+  page.requests.shift().respond(page.data); page.openBrain();
   assert.match(page.nodes.get('brain-summary').textContent, /2 perguntas/);
-  const points = page.nodes.get('brain-svg').childNodes.filter((n: any) => n.attributes?.role === 'button');
+  const points = page.nodes.get('brain-svg').childNodes.filter((n: any) => n.attributes?.['aria-label']?.startsWith('Pergunta:'));
   assert.equal(points.length, 2); assert.notEqual(points[0].attributes['aria-label'], points[1].attributes['aria-label']);
   page.nodes.get('question-list').childNodes[0].onclick();
   assert.equal(page.nodes.get('question-detail').hidden, false);

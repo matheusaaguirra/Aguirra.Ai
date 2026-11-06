@@ -25,13 +25,13 @@ Assistente pessoal web com conversas, pesquisa e um núcleo de memória que voc�
 - Criação, edição, exclusão, importação de memórias locais e exportação JSON dos dados carregados.
 - Conta e sincronização na nuvem pelo Supabase, com isolamento por usuário.
 - IA local no computador com Ollama; nenhum endpoint de modelo pago.
-- Perguntas sem conta, contexto por navegador e ferramenta de data/hora.
+- Perguntas sem conta, núcleo privado no Supabase e ferramenta de data/hora.
 - Pesquisa opcional com Google e fontes verificáveis; manchetes RSS enquanto a chave não é configurada.
 - Interface em tons roxos, ícones vetoriais e marca provisória em quadrado vazio.
 - Voz sintética automática em português, seletor de voz e botão Ouvir resposta. O Windows local pode gerar áudio WAV para navegadores antigos, sem API paga.
 - Modo econômico e tela cheia quando suportados pelo navegador.
 
-**Sem login**, a memória e o histórico funcionam neste navegador. As respostas locais são limitadas a memória, data/hora e orientações de uso. A conversa completa roda no computador com Ollama, acessada pelo endereço local; não há respostas fictícias de demonstração.
+**Na web**, perguntas, respostas, notas e áudio ficam no Supabase. Visitantes usam uma sessão privada. A conta Google permite acessar o mesmo núcleo em outros aparelhos.
 
 ## Memória, de verdade
 

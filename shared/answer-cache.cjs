@@ -10,13 +10,36 @@
     if (s.length < 3 || s.length > 600 || /\b(versao|versoes|novo|nova|semana|mes|ano|hoje|hj|agora|amanha|ontem|atual|atualmente|ultim[oa]s?|noticias?|manchetes?|acontecendo|clima|tempo|precos?|cotacao|cambio|dolar|valor|custo|custa|custam|vale|valem|taxa|salario|placar|presidente|governador|eleicoes|resultado|ao vivo|proxima|proximo|recente|data|horas?|minutos?|segundos?|eu|meu|minha|meus|minhas|mim|nosso|nossa|isso|isto|essa|esse|esses|essas|aquilo|anterior|senha|password|token|chave|cpf|cartao|saude|medicamento|dose|investir|investimento|juridic[oa]|lei|leis|voce)\b/.test(s)) return null;
     if (/\b(?:sk-|sb_secret_|AIza)[a-zA-Z0-9_-]+/.test(question) || /\b\d{11,}\b/.test(s)) return null;
     var kind = 'exact', topic = s, match;
-    if ((match = /^(?:o que (?:e|sao|significa)|qual (?:e )?(?:a )?definicao d[eo]|(?:me )?expli(?:que|car)(?: o que (?:e|sao))?|(?:me )?explica(?: o que (?:e|sao))?|defina)\s+(.+)$/.exec(s))) { kind = 'definition'; topic = match[1]; }
-    else if ((match = /^(?:para que (?:serve|servem)|qual (?:e )?(?:a )?funcao d[eo])\s+(.+)$/.exec(s))) { kind = 'purpose'; topic = match[1]; }
+    if ((match = /^(?:o que (?:e|seria|sao|significa)|qual (?:e )?(?:a )?definicao d[eo]|(?:me )?expli(?:que|car)(?: o que (?:e|sao))?|(?:me )?explica(?: o que (?:e|sao))?|defina)\s+(.+)$/.exec(s))) { kind = 'definition'; topic = match[1]; }
+    else if ((match = /^(?:para que (?:serve|servem)|qual (?:e )?(?:a )?(?:funcao|utilidade|finalidade) d[eo])\s+(.+)$/.exec(s))) { kind = 'purpose'; topic = match[1]; }
     else if (!/^(?:como|por que|porque|qual|quais|quanto|quem|quando|onde|o que|para que|descreva|compare)\b/.test(s)) return null;
     topic = topic.replace(/\bmemoria (?:de acesso aleatorio|ram)\b/g, 'ram').replace(/\binteligencia artificial\b/g, 'ia').replace(/\bcpu\b/g, 'processador');
     // Keep all topic qualifiers, numbers, negation and order. Similar means a safe rephrasing, not a loose keyword match.
     if (kind !== 'exact') topic = topic.replace(/^(?:o|a|os|as|um|uma) /, '');
     return kind + ':' + topic;
+  }
+  function words(question) {
+    var text = normalize(question).replace(/\bmemoria (?:ram|de acesso aleatorio)\b/g, 'ram').replace(/\binteligencia artificial\b/g,'ia');
+    var stop = /^(o|a|as|os|um|uma|de|da|do|das|dos|em|no|na|nos|nas|e|ou|por|que|qual|quais|quem|como|quando|onde|para|sobre|me|se|voce|vc|eu|meu|minha|tem|ser|sao|pode|favor|aguirra|explique|explicar|explica|significa|definicao|gostaria|saber|funciona|serve|fazer|isso)$/;
+    var unique = [];
+    (text.match(/[a-z0-9]+/g) || []).forEach(function (word) {
+      if (word.length > 1 && !stop.test(word) && unique.indexOf(word) < 0) unique.push(word);
+    });
+    return unique;
+  }
+  function related(question, messages, memories, enabled) {
+    if (enabled === false || !signature(question)) return [];
+    var terms = words(question), context = contextKey(memories, enabled), now = Date.now(), seen = {};
+    return pairs(messages).map(function (p) {
+      var a = p.answer, m = a && a.cache_meta;
+      if (!m || a.failed || a.exclude_context || p.question.exclude_context || m.version !== VERSION || m.context !== context || !(m.expires_at > now && m.generated_at <= now && m.expires_at-m.generated_at <= TTL)) return null;
+      var other = words(p.question.content), common = terms.filter(function (w) { return other.indexOf(w) >= 0; }).length;
+      if (!common || common / Math.max(terms.length, other.length, 1) < 0.5) return null;
+      return {id:p.question.id, question:p.question.content, answer:a.content.slice(0,1000), score:common / (terms.length + other.length - common)};
+    }).filter(Boolean).sort(function (a,b) { return b.score-a.score; }).filter(function (p) {
+      if (seen[p.answer]) return false;
+      seen[p.answer] = true; return true;
+    }).slice(0,3);
   }
   function contextKey(memories, enabled) {
     var items = (enabled === false ? [] : memories || []).map(function (m) { return JSON.stringify([m.category, m.content]); }).sort();
@@ -50,5 +73,5 @@
     }
     return null;
   }
-  return { signature: signature, contextKey: contextKey, makeMeta: makeMeta, pairs: pairs, find: find, ttl: TTL };
+  return { words: words, related: related, signature: signature, contextKey: contextKey, makeMeta: makeMeta, pairs: pairs, find: find, ttl: TTL };
 }));

@@ -1,4 +1,5 @@
 import { defineChannel, GET, POST, DELETE, type RouteHandlerArgs } from "eve/channels";
+import { visitor, visitorData, store, namespace, digest, item, stableId, importedItems, legacyBatch } from "../lib/cloud-graph.ts";
 import answerCache from "../../shared/answer-cache.cjs";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
@@ -36,10 +37,31 @@ async function saveMemory(session: Session, input: z.infer<typeof memoryInput>) 
   return db(session, "aguirra_memories?on_conflict=user_id,key", "POST", { user_id: session.user.id, key: normalize(input.content).slice(0, 100), category: input.category, content: input.content, origin: "manual", source_message_id: null, updated_at: new Date().toISOString() }, "resolution=merge-duplicates,return=representation");
 }
 export async function guestChat(request: Request, args: RouteHandlerArgs) {
-  const input = guestInput.parse(await body(request));
+  const input = guestInput.parse(await body(request)), space = visitor(request);
   await claimPublicBudget('guest', args.requestIp || 'unknown');
-  const result = await answerQuestion(redact(input.message), guestContext(input), guestLearned(input));
-  return json({ ...result, learned: guestLearned(input).length > 0, guest: true });
+  const data = await visitorData(space.owner);
+  const previous = data.messages.find(m => m.id === input.request_id);
+  const saved = previous && data.messages.find(m => m.id === previous.reply_id);
+  if (saved) return json({reply:saved.content,answer_id:saved.id,sources:saved.sources || []},200,space.cookies);
+  const message = redact(input.message), enabled = data.settings.memory_enabled !== false;
+  const learned = enabled ? extract(message) : [];
+  const hit = input.force_refresh ? null : answerCache.find(message,data.messages,data.memories,enabled);
+  const context = guestContext({...input,message,history:assistantHistory(data.messages,input.request_id),memories:data.memories,memory_enabled:enabled});
+  context.points = answerCache.related(message,data.messages,data.memories,enabled);
+  const started = new Date().toISOString(), aid = stableId('reply/' + input.request_id);
+  let result, status = 200;
+  try {
+    result = hit ? {reply:hit.answer.content,sources:hit.answer.sources || [],mode:'answer_memory'} : await answerQuestion(message,context,learned);
+  } catch (e) {
+    status = e instanceof AppError ? e.status : 503;
+    result = {reply:e instanceof AppError ? e.message : 'Não consegui responder agora.',sources:[],mode:'error'};
+  }
+  const meta = hit ? {...hit.answer.cache_meta,reused_from:hit.question.id} : answerCache.makeMeta(message,result.reply,result.mode || '',data.memories,enabled);
+  if(meta && !hit) meta.related_to = context.points.map(p=>p.id);
+  const q = {id:input.request_id,thread_id:'visitor',role:'user',content:message,reply_id:aid,created_at:started};
+  const a = {id:aid,thread_id:'visitor',role:'assistant',content:result.reply,sources:result.sources,cache_meta:meta,failed:status!==200,created_at:new Date().toISOString()};
+  await store(space.owner,'put',[item('message',q.id,q),item('message',aid,a),...learned.map(m=>item('memory',m.key,{...m,id:stableId(m.key),source_message_id:q.id,updated_at:started}))]);
+  return json(status===200 ? {...result,answer_id:aid,cached:!!hit,cache_meta:meta,learned:!!learned.length} : {error:result.reply},status,space.cookies);
 }
 export async function chat(request: Request, args: RouteHandlerArgs, session: Session) {
   const input = z.object({ message: z.string().trim().min(1).max(4000), thread_id: uuid.nullish(), request_id: uuid, force_refresh: z.boolean().default(false) }).parse(await body(request));
@@ -62,9 +84,11 @@ export async function chat(request: Request, args: RouteHandlerArgs, session: Se
   const previous = data ? assistantHistory(data.messages, input.request_id) : [];
   try {
     const reused = !input.force_refresh && data ? answerCache.find(message, data.messages, allMemories, data.settings.memory_enabled) : null;
-    const result = reused ? { reply: reused.answer.content, sources: reused.answer.sources || [], search_entry_point: null, mode: "answer_memory" } : await answerQuestion(message, { history: previous, memories: context.map(m => ({ category: m.category, content: m.content })) }, learned);
+    const points = data ? answerCache.related(message,data.messages,allMemories,data.settings.memory_enabled) : [];
+    const result = reused ? { reply: reused.answer.content, sources: reused.answer.sources || [], search_entry_point: null, mode: "answer_memory" } : await answerQuestion(message, { history: previous, points, memories: context.map(m => ({ category: m.category, content: m.content })) }, learned);
     const { reply, sources, search_entry_point, mode } = result;
     const cache_meta = reused ? { ...reused.answer.cache_meta, reused_from: reused.question.id } : answerCache.makeMeta(message, reply, mode || "", allMemories, data?.settings.memory_enabled);
+    if(cache_meta && !reused) cache_meta.related_to = points.map(p => p.id);
     const replyId = randomUUID();
     await db(session, "aguirra_messages", "POST", { id: replyId, user_id: session.user.id, thread_id: threadId, role: "assistant", content: reply, cache_meta, sources, search_entry_point: search_entry_point || null });
     await db(session, `aguirra_messages?id=eq.${input.request_id}`, "PATCH", { reply_id: replyId });
@@ -75,6 +99,20 @@ export async function chat(request: Request, args: RouteHandlerArgs, session: Se
     return json({ error: message, thread_id: threadId }, error instanceof AppError ? error.status : 503, session.cookies);
   }
 }
+function checkImported(records: any[], messages: any[], memories: any[]) {
+  const complete = records.every(record => record.kind === 'message'
+    ? messages.some(m => m.id === record.id && m.content === record.content && m.role === record.role)
+    : memories.some(m => m.key === record.key && m.content === record.content && m.category === record.category));
+  if (!complete) throw new AppError(409,'Já existe um registro diferente com o mesmo identificador. O histórico anterior foi preservado.');
+}
+async function verifyImported(session: Session, records: any[]) {
+  const ids = records.filter(r => r.kind === 'message').map(r => uuid.parse(r.id));
+  const [messages, memories] = await Promise.all([
+    ids.length ? db(session,'aguirra_messages?select=id,role,content&id=in.('+ids.join(',')+')') : [],
+    records.some(r => r.kind === 'memory') ? db(session,'aguirra_memories?select=key,category,content') : []
+  ]);
+  checkImported(records,messages,memories);
+}
 async function handle(request: Request, args: RouteHandlerArgs): Promise<Response> {
   let session: Session | null = null;
   try {
@@ -83,7 +121,8 @@ async function handle(request: Request, args: RouteHandlerArgs): Promise<Respons
     if (resource === "google-callback" && request.method === "GET") return await completeGoogleLogin(request);
     if (resource === "session" && request.method === "GET") {
       session = await getSession(request, true);
-      return json({ user: session?.user || null, local: localMode(), ai: googleReady() || (localMode() && process.env.AGUIRRA_AI_ENABLED !== "false"), guest_chat: true, google_login: await googleLoginAvailable(), google_ready: googleReady(), google_search: false, model: googleReady() ? "gemini-3.5-flash-lite" : null, search: true, search_mode: googleReady() ? "public_sources" : "rss", paid_apis: false, tts_server: serverVoiceAvailable(), elevenlabs_ready: elevenReady(), transcription_ready: elevenReady() }, 200, session?.cookies);
+      const space = localMode() ? null : visitor(request);
+      return json({ visitor_available: !!(space?.existing), user: session?.user || null, local: localMode(), ai: googleReady() || (localMode() && process.env.AGUIRRA_AI_ENABLED !== "false"), guest_chat: true, google_login: await googleLoginAvailable(), google_ready: googleReady(), google_search: false, model: googleReady() ? "gemini-3.5-flash-lite" : null, search: true, search_mode: googleReady() ? "public_sources" : "rss", paid_apis: false, tts_server: serverVoiceAvailable(), elevenlabs_ready: elevenReady(), transcription_ready: elevenReady() }, 200, session ? session.cookies : space?.cookies);
     }
     if (resource === "auth" && request.method === "POST") {
       const input = z.object({ mode: z.enum(["login", "register"]), email: z.string().email().max(254), password: z.string().min(8).max(128) }).parse(await body(request));
@@ -101,7 +140,15 @@ async function handle(request: Request, args: RouteHandlerArgs): Promise<Respons
     if ((resource === "speech" || resource === "transcribe") && request.method === "POST") {
       if (!elevenReady()) throw new AppError(503, "ElevenLabs aguarda a chave de uma conta gratuita no servidor.");
       await claimPublicBudget('guest', args.requestIp || 'unknown');
-      if (resource === "speech") { const input = z.object({ text: z.string().trim().min(1).max(1500) }).parse(await body(request)); return json(await elevenSpeech(input.text)); }
+      if (resource === "speech") { const input = z.object({ text: z.string().trim().min(1).max(1500) }).parse(await body(request)); if(localMode()) return json(await elevenSpeech(input.text));
+        const current = await getSession(request,true), space = visitor(request);
+        const owner = current ? namespace('audio/' + current.user.id) : space.owner;
+        const key = digest('flash-v1/' + (process.env.ELEVENLABS_VOICE_ID || 'George') + '/' + input.text);
+        const cached = !localMode() && await store(owner,'audio',[],key);
+        if(cached) return json(cached,200,current?.cookies || space.cookies);
+        const audio = await elevenSpeech(input.text);
+        await store(owner,'put',[item('audio',key,audio)]);
+        return json(audio,200,current?.cookies || space.cookies); }
       const input = z.object({ audio: z.string().min(1).max(900000) }).parse(await body(request, 950000));
       return json({ text: await elevenTranscribe(input.audio) });
     }
@@ -112,7 +159,51 @@ async function handle(request: Request, args: RouteHandlerArgs): Promise<Respons
       const wave = await synthesizeWave(input.text);
       return new Response(new Uint8Array(wave).buffer, { headers: { "Content-Type": "audio/wav", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" } });
     }
-    session = await getSession(request); if (!session) throw new AppError(401, "Entre na sua conta.");
+    session = await getSession(request, true);
+    if (resource === 'import-graph' && request.method === 'POST') {
+      const entries = importedItems(legacyBatch.parse(await body(request, 1800000)));
+      const records = entries.map(entry => entry.value);
+      if (session) {
+        await db(session,'rpc/aguirra_import_graph','POST',{batch:records});
+        await verifyImported(session,records);
+        return json({ok:true},200,session.cookies);
+      }
+      const space = visitor(request);
+      await claimPublicBudget('guest',args.requestIp || 'unknown');
+      await store(space.owner,'import',entries);
+      const saved = await visitorData(space.owner);
+      checkImported(records,saved.messages,saved.memories);
+      return json({ok:true},200,space.cookies);
+    }
+    if (resource === 'adopt-visitor' && request.method === 'POST' && session) {
+      const space = visitor(request);
+      if (space.existing) {
+        const old = await visitorData(space.owner);
+        const records = old.messages.concat(old.memories);
+        for (let i=0;i<records.length;i+=50) {
+          const batch=records.slice(i,i+50);
+          await db(session,'rpc/aguirra_import_graph','POST',{batch});
+          await verifyImported(session,batch);
+        }
+      }
+      return json({ok:true},200,[...session.cookies,'aguirra_visitor=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0']);
+    }
+    if (!session) {
+      const space = visitor(request);
+      if (resource === 'data' && request.method === 'GET') return json(await visitorData(space.owner),200,space.cookies);
+      if (request.method !== 'GET') await claimPublicBudget('guest',args.requestIp || 'unknown');
+      if (resource === 'memory' && request.method === 'POST') {
+        const m=memoryInput.parse(await body(request)); if(sensitive(m.content)) throw new AppError(400,'Dados sensíveis não entram no núcleo.');
+        const existing = m.id ? (await visitorData(space.owner)).memories.find(r => r.id===m.id) : null;
+        const id=m.id || randomUUID(), key=existing ? existing.key : id; await store(space.owner,'put',[item('memory',key,{...m,id,key,origin:'manual',updated_at:new Date().toISOString()})]);
+      } else if(resource === 'memory' && request.method === 'DELETE') {
+        const id=uuid.parse(url.searchParams.get('id')); const current=await visitorData(space.owner); const memory=current.memories.find(m=>m.id===id); if(memory) await store(space.owner,'remove_memory',[],memory.key);
+      } else if(resource === 'settings' && request.method === 'POST') {
+        const settings=z.object({memory_enabled:z.boolean()}).parse(await body(request)); await store(space.owner,'put',[item('setting','current',settings)]);
+      } else if(resource === 'data' && request.method === 'DELETE') await store(space.owner,'clear');
+      else throw new AppError(404,'Rota não encontrada.');
+      return json({ok:true},200,space.cookies);
+    }
     if (resource === "voice" && request.method === "GET") {
       if (!serverVoiceAvailable()) throw new AppError(503, "Use a voz do navegador ou execute o Aguirra no Windows para gerar o áudio localmente.");
       const sample = url.searchParams.get("sample") === "1";
@@ -131,7 +222,7 @@ async function handle(request: Request, args: RouteHandlerArgs): Promise<Respons
     }
     if (resource === "settings" && request.method === "POST") { const input = z.object({ memory_enabled: z.boolean() }).parse(await body(request)); await db(session, "aguirra_settings?on_conflict=user_id", "POST", { user_id: session.user.id, ...input }, "resolution=merge-duplicates,return=representation"); return json({ ok: true }, 200, session.cookies); }
     if (resource === "import" && request.method === "POST") { const input = z.object({ memories: z.array(memoryInput.omit({ id: true })).max(100) }).parse(await body(request)); for (const m of input.memories) if (!sensitive(m.content)) await saveMemory(session, m); return json({ ok: true }, 200, session.cookies); }
-    if (resource === "data" && request.method === "DELETE") { await db(session, "rpc/aguirra_forget_all", "POST", {}); return json({ ok: true }, 200, session.cookies); }
+    if (resource === "data" && request.method === "DELETE") { await db(session, "rpc/aguirra_forget_all", "POST", {}); if(!localMode()) await store(namespace('audio/'+session.user.id),'clear_audio'); return json({ ok: true }, 200, session.cookies); }
     return json({ error: "Rota não encontrada." }, 404, session.cookies);
   } catch (error) {
     if (error instanceof z.ZodError) return json({ error: "Confira os campos enviados. A mensagem pode ter até 4.000 caracteres e a memória até 500." }, 400, session?.cookies);

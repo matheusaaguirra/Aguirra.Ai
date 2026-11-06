@@ -2,6 +2,8 @@
   'use strict';
   var M = window.AguirraMemory, A = window.AguirraAnswers, storageKey = 'aguirra.local.v1', preferencesKey = 'aguirra.preferences.v1';
   var user = null, localApi = false, voiceServer = false, googleLoginReady = false, sessionReady = false, busy = false, activeView = 'home', memoryFilter = 'all', editingMemory = null, authMode = 'login', toastTimer, modalFocus = null;
+  var graphTopic = null, visitorAvailable = false, importing = false;
+  var G = window.AguirraGraph;
   var elevenReady = false, micProcessing = false, lastDataSync = 0, questionPage = 0, selectedQuestion = null;
   var oldAndroid = /Android 4\./.test(navigator.userAgent), state = empty(), preferences = readJSON(preferencesKey, { low_power: oldAndroid, voice: true });
   if (preferences.voice_provider_version !== 1) { preferences.voice_name = '__elevenlabs__'; preferences.voice_provider_version = 1; savePreferences(); }
@@ -10,7 +12,6 @@
   function empty() { return { memories: [], threads: [], messages: [], topics: [], settings: { memory_enabled: true } }; }
   function uid() { return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) { var r = Math.floor(Math.random() * 16); return (c === 'x' ? r : ((r & 3) | 8)).toString(16); }); }
   function readJSON(key, fallback) { try { return JSON.parse(localStorage.getItem(key)) || fallback; } catch (e) { return fallback; } }
-  function saveLocal() { if (user) return; try { localStorage.setItem(storageKey, JSON.stringify(state)); } catch (e) { toast('O navegador não conseguiu salvar. Exporte seus dados para não perder o contexto.'); } }
   function savePreferences() { try { localStorage.setItem(preferencesKey, JSON.stringify(preferences)); } catch (e) { /* Session-only settings remain usable. */ } }
   function el(tag, cls, content) { var n = document.createElement(tag); if (cls) n.className = cls; if (content !== undefined) n.appendChild(document.createTextNode(String(content))); return n; }
   function icon(name) { var n = document.createElementNS('http://www.w3.org/2000/svg', 'svg'), use = document.createElementNS('http://www.w3.org/2000/svg', 'use'); n.setAttribute('class', 'icon'); n.setAttribute('viewBox', '0 0 24 24'); n.setAttribute('aria-hidden', 'true'); use.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', '#i-' + name); n.appendChild(use); return n; }
@@ -24,7 +25,7 @@
     xhr.setRequestHeader('Accept', 'application/json');
     if (body) xhr.setRequestHeader('Content-Type', 'application/json');
     xhr.onreadystatechange = function () { if (xhr.readyState !== 4) return; var data; try { data = JSON.parse(xhr.responseText); } catch (e) { data = {}; } if (xhr.status >= 200 && xhr.status < 300) finish(null, data); else finish({ status: xhr.status, message: data.error || 'Não consegui conectar ao servidor agora.' }, data); };
-    xhr.onerror = function () { finish({ message: 'Sem conexão com o servidor. Suas memórias neste aparelho continuam disponíveis.' }); };
+    xhr.onerror = function () { finish({ message: 'Sem conexão com o Supabase. Tente novamente.' }); };
     xhr.ontimeout = function () { finish({ message: 'A resposta demorou mais que o esperado. Confira o histórico antes de reenviar.' }); };
     xhr.send(body ? JSON.stringify(body) : null);
   }
@@ -43,67 +44,39 @@
   function render() {
     var points = A.pairs(state.messages), count = state.memories.length + points.length;
     $('home-memory-count').textContent = pad(count); $('nav-memory-count').textContent = String(count);
-    $('context-description').textContent = count ? points.length + (points.length === 1 ? ' pergunta e ' : ' perguntas e ') + state.memories.length + (state.memories.length === 1 ? ' memória guardada no seu núcleo.' : ' memórias guardadas no seu núcleo.') : 'Seu núcleo começa com uma conversa. Conte uma preferência ou algo que queira guardar.';
+    var answerCount = G.memoryCount(points);
+    G.draw($('mini-brain'), G.network(points.slice(-50),state.memories.slice(0,12)), null, null, true);
+    $('context-description').textContent = points.length + (points.length === 1 ? ' pergunta' : ' perguntas') + ' · ' + answerCount + (answerCount === 1 ? ' memória de resposta' : ' memórias de resposta') + (state.memories.length ? ' · '+state.memories.length+' notas pessoais' : '');
     $('last-connection').textContent = state.memories.length ? state.memories[0].content : (points.length ? points[points.length - 1].question.content : 'As ideias que você guardar aparecerão aqui.');
-    $('account-name').textContent = user ? (user.email || 'Sua conta') : 'Seu espaço pessoal'; wipe($('avatar')); $('avatar').appendChild(icon('user')); $('account-state').textContent = user ? (localApi ? 'Memória no seu computador' : 'Memória sincronizada') : 'Memória neste aparelho';
+    $('account-name').textContent = user ? (user.email || 'Sua conta') : 'Seu espaço pessoal'; wipe($('avatar')); $('avatar').appendChild(icon('user')); $('account-state').textContent = user ? (localApi ? 'Memória no seu computador' : 'Memória sincronizada') : 'Visitante · Supabase';
     renderSettings(); if (activeView === 'brain') renderBrain(); if (activeView === 'history') renderHistory();
   }
   function addMessage(role, text, failed) { var m = { id: uid(), thread_id: state.log_id, role: role, content: text, created_at: new Date().toISOString(), sources: [], failed: !!failed }; state.messages.push(m); return m; }
   function ensureLog() { if (!state.log_id) state.log_id = uid(); }
-  function learn(text, messageId) {
-    if (state.settings.memory_enabled !== false) { var extracted = M.extract(text); for (var i = 0; i < extracted.length; i++) putLocalMemory(extracted[i], messageId); }
-    var topics = M.topics(text); for (var j = 0; j < topics.length; j++) { var found = null; for (var k = 0; k < state.topics.length; k++) if (state.topics[k].name === topics[j]) found = state.topics[k]; if (found) found.count++; else state.topics.push({ name: topics[j], count: 1 }); }
-  }
-  function putLocalMemory(m, messageId) {
-    var index = -1; for (var i = 0; i < state.memories.length; i++) if (state.memories[i].key === m.key) index = i;
-    m.id = index >= 0 ? state.memories[index].id : uid(); m.updated_at = new Date().toISOString(); m.source_message_id = messageId || null;
-    window.AguirraVoice.clearCache();
-    if (index >= 0) { var previous = state.memories[index]; if (previous.source_message_id && previous.source_message_id !== messageId) excludeLocalMemory(previous); state.memories.splice(index, 1); } state.memories.unshift(m);
-  }
-  function localAnswer(text, learned) {
-    var identity = M.identityAnswer(text); if (identity) return identity;
-    var kind = M.intent(text);
-    if (kind === 'clock') return 'Agora são ' + localDate(new Date(), true) + ' de ' + localDate() + ', pelo relógio e fuso deste aparelho.';
-    if (learned.length) return 'Guardei no seu núcleo: ' + learned.map(function (m) { return m.content; }).join('; ') + '. Você pode revisar essa memória no Mapa cerebral.';
-    if (kind === 'memory') return state.memories.length ? 'Este é o seu núcleo neste aparelho:\n\n' + state.memories.map(function (m) { return '• ' + m.content; }).join('\n') + '\n\nVocê pode editar ou esquecer qualquer item no Mapa cerebral.' : 'Seu núcleo ainda está vazio. Conte uma preferência ou guarde uma memória diretamente no mapa.';
-    return null;
-  }
   function send(text, forceRefresh) {
     text = String(text || '').trim(); if (!text || busy || micProcessing) return; if (!sessionReady) { toast('Conectando ao Aguirra. Envie novamente em um instante.'); return; }
     if (text.length > 4000) { toast('Sua mensagem deve ter até 4.000 caracteres.'); return; }
     text = M.redact(text); window.AguirraVoice.prime(); window.AguirraMicrophone.cancel(); window.AguirraVoice.stop(); go('home'); $('voice-hint').hidden = true; $('home-input').value = '';
-    var guest = !user, reused = !forceRefresh && (guest || Date.now() - lastDataSync < 60000) ? A.find(text, state.messages, state.memories, state.settings.memory_enabled) : null;
+    var reused = !forceRefresh && Date.now() - lastDataSync < 60000 ? A.find(text, state.messages, state.memories, state.settings.memory_enabled) : null;
     ensureLog(); var pending = addMessage('user', text), payload = { message: text, request_id: pending.id, force_refresh: !!forceRefresh };
-    if (guest) {
-      learn(text, pending.id);
-      var answer = localAnswer(text, state.settings.memory_enabled !== false ? M.extract(text) : []);
-      if (answer) { var direct = addMessage('assistant', answer); pending.reply_id = direct.id; saveLocal(); render(); speak(answer); return; }
-      if (reused) { var remembered = addMessage('assistant', reused.answer.content); remembered.sources = reused.answer.sources || []; remembered.mode = 'answer_memory'; remembered.cache_meta = copyCacheMeta(reused); pending.reply_id = remembered.id; saveLocal(); render(); speak(remembered.content, remembered); return; }
-      payload.history = state.messages.filter(function (m) { return m.id !== pending.id && !m.failed && !m.exclude_context; }).slice(-6).map(function (m) { return { role: m.role, text: m.content.slice(0, 1200) }; });
-      payload.memories = state.settings.memory_enabled === false ? [] : state.memories.slice(0, 50).map(function (m) { return { category: m.category, content: m.content }; });
-      payload.memory_enabled = state.settings.memory_enabled !== false;
-      saveLocal();
-    }
     setBusy(true);
     // Identity is the same on the device and server. Speak now while the signed-in record is saved.
-    var immediateIdentity = !guest && M.identityAnswer(text);
+    var immediateIdentity = M.identityAnswer(text);
     if (immediateIdentity || reused) speak(immediateIdentity || reused.answer.content, { id: null });
     request('POST', '/api/ask', payload, function (err, result) {
       setBusy(false);
       if (err) {
         if (immediateIdentity || reused) { toast('Não consegui confirmar o registro desta pergunta no histórico. ' + err.message); loadData(); return; }
         addMessage('assistant', err.message, true); toast(err.message);
-        if (guest) { saveLocal(); render(); speak(err.message); }
-        else { speak(err.message, { id: null }); loadData(); }
+        speak(err.message, {id:null}); loadData();
         return;
       }
-      if (guest) { var reply = addMessage('assistant', result.reply); pending.reply_id = reply.id; reply.sources = result.sources || []; reply.search_entry_point = result.search_entry_point || null; reply.mode = result.mode; reply.cache_meta = A.makeMeta(text, result.reply, result.mode, state.memories, state.settings.memory_enabled); saveLocal(); render(); speak(result.reply); return; }
       if (!immediateIdentity && !reused) speak(result.reply, { id: result.answer_id || null });
       else if (lastReply === window.AguirraVoice.cleanText(result.reply)) lastReplyId = result.answer_id || null;
+      else speak(result.reply,{id:result.answer_id || null});
       loadData(function () { if (result.learned) toast('Nova conexão guardada no seu núcleo.'); });
     });
   }
-  function copyCacheMeta(match) { var m = match.answer.cache_meta; return { version: m.version, key: m.key, context: m.context, expires_at: m.expires_at, generated_at: m.generated_at, reused_from: match.question.id }; }
   function setBusy(value) { busy = value; $('home-submit').disabled = value; $('home-input').disabled = value; if (value) hideCaption(); updateOrbState(); }
   function loadData(callback) { request('GET', '/api/data', null, function (err, data) { if (err) { toast(err.message); if (callback) callback(err); return; } var oldContext = A.contextKey(state.memories, state.settings.memory_enabled); state = data; lastDataSync = Date.now(); if (oldContext !== A.contextKey(state.memories, state.settings.memory_enabled)) window.AguirraVoice.clearCache(); render(); if (callback) callback(); }); }
   function renderHistory() {
@@ -131,35 +104,25 @@
   }
   function svgEl(tag, attrs, content) { var n = document.createElementNS('http://www.w3.org/2000/svg', tag); for (var k in attrs) if (Object.prototype.hasOwnProperty.call(attrs, k)) n.setAttribute(k, attrs[k]); if (content !== undefined) n.textContent = content; return n; }
   function renderQuestionMap() {
-    var all = A.pairs(state.messages).reverse(), query = M.normalize($('question-search').value), list = all.filter(function (p) { return !query || M.normalize(p.question.content).indexOf(query) !== -1; });
-    var totalPages = Math.max(1, Math.ceil(list.length / 10)); questionPage = Math.max(0, Math.min(questionPage, totalPages - 1));
-    $('brain-summary').textContent = all.length + (all.length === 1 ? ' pergunta · ' : ' perguntas · ') + state.memories.length + (state.memories.length === 1 ? ' memória' : ' memórias');
-    var pages = $('question-pages'); wipe(pages);
-    function pageButton(label, disabled, delta) { var b = el('button', 'quiet-button', label); b.type = 'button'; b.disabled = disabled; b.onclick = function () { questionPage += delta; renderBrain(); }; pages.appendChild(b); }
-    pageButton('Anterior', questionPage === 0, -1); pages.appendChild(el('span', '', (questionPage + 1) + ' / ' + totalPages)); pageButton('Próxima', questionPage + 1 >= totalPages, 1);
-    var visible = list.slice(questionPage * 10, questionPage * 10 + 10), svg = $('brain-svg'), index = $('question-list'), positions = {}; wipe(svg); wipe(index);
-    svg.appendChild(svgEl('circle', { cx: 360, cy: 250, r: 80, fill: 'none', stroke: '#30253d', 'stroke-dasharray': '3 9' }));
-    for (var i = 0; i < visible.length; i++) positions[visible[i].question.id] = { x: i < 5 ? 52 : 454, y: 52 + (i % 5) * 96 };
-    for (i = 0; i < visible.length; i++) {
-      var p = visible[i], position = positions[p.question.id], meta = p.answer && p.answer.cache_meta, target = meta && positions[meta.reused_from];
-      svg.appendChild(svgEl('line', { x1: 360, y1: 250, x2: position.x, y2: position.y, stroke: '#43324f', 'stroke-width': 1 }));
-      if (target) svg.appendChild(svgEl('line', { x1: target.x, y1: target.y, x2: position.x, y2: position.y, stroke: '#b08cdd', 'stroke-dasharray': '4 5', 'stroke-width': 1.5 }));
-    }
-    svg.appendChild(svgEl('circle', { cx: 360, cy: 250, r: 37, fill: '#2f243c', stroke: '#a184c6', 'stroke-width': 1.5 }));
-    svg.appendChild(svgEl('text', { x: 360, y: 255, 'text-anchor': 'middle', fill: '#dac5f5', 'font-size': 14, 'font-family': 'Arial' }, 'Aguirra'));
-    for (i = 0; i < visible.length; i++) (function (pair, number) {
-      var q = pair.question, a = pair.answer, pos = positions[q.id], ready = !!A.find(q.content, [q].concat(a ? [a] : []), state.memories, state.settings.memory_enabled);
-      var group = svgEl('g', { tabindex: '0', role: 'button', 'aria-label': 'Pergunta ' + (questionPage * 10 + number + 1) + ': ' + q.content, cursor: 'pointer' });
-      group.appendChild(svgEl('title', {}, q.content)); group.appendChild(svgEl('circle', { cx: pos.x, cy: pos.y, r: 28, fill: 'transparent' }));
-      group.appendChild(svgEl('circle', { cx: pos.x, cy: pos.y, r: selectedQuestion === q.id ? 17 : 13, fill: ready ? '#ab83df' : '#30253d', stroke: ready ? '#d9bafa' : '#7d6497', 'stroke-width': 1.5 }));
-      group.appendChild(svgEl('text', { x: pos.x + 25, y: pos.y - 3, fill: '#d4c4e7', 'font-size': 12, 'font-family': 'Arial' }, q.content.length > 28 ? q.content.slice(0, 27) + '…' : q.content));
-      group.appendChild(svgEl('text', { x: pos.x + 25, y: pos.y + 16, fill: '#8d7b9f', 'font-size': 10, 'font-family': 'Arial' }, a && a.cache_meta && a.cache_meta.reused_from ? 'Conectada a uma resposta' : (ready ? 'Resposta disponível' : 'Pergunta registrada')));
-      function select() { selectedQuestion = q.id; renderBrain(); }
-      group.onclick = select; group.onkeydown = function (event) { if (event.keyCode === 13 || event.keyCode === 32) { event.preventDefault(); select(); } }; svg.appendChild(group);
-      var button = el('button', 'question-index-item' + (selectedQuestion === q.id ? ' selected' : ''), q.content); button.type = 'button'; button.onclick = select; index.appendChild(button);
-    }(visible[i], i));
-    if (!all.length) { svg.appendChild(svgEl('text', { x: 360, y: 370, 'text-anchor': 'middle', fill: '#ad99bf', 'font-size': 14, 'font-family': 'Arial' }, 'Sua próxima pergunta será o primeiro ponto.')); }
-    if (all.length && !list.length) index.appendChild(el('p', '', 'Nenhuma pergunta encontrada.'));
+    var all = A.pairs(state.messages).reverse(), query = M.normalize($('question-search').value), list = all.filter(function (p) { return (!graphTopic || G.subject(p.question.content)===graphTopic) && (!query || M.normalize(p.question.content+' '+(p.answer ? p.answer.content : '')).indexOf(query)!==-1); });
+    var totalPages = Math.max(1, Math.ceil(list.length / 60)); questionPage = Math.max(0, Math.min(questionPage, totalPages - 1));
+    $('brain-summary').textContent = all.length+' perguntas · '+G.memoryCount(all)+' memórias de resposta · '+state.memories.length+' notas pessoais';
+    var pages=$('question-pages'), svg=$('brain-svg'), index=$('question-list'), i;
+    wipe(pages); wipe(index);
+    function action(label,fn){var btn=el('button','quiet-button',label);btn.type='button';btn.onclick=fn;pages.appendChild(btn);return btn;}
+    action('−',function(){G.zoom(.8,svg);});action('+',function(){G.zoom(1.25,svg);});
+    action('Enquadrar',function(){G.zoom(0,svg);graphTopic=null;questionPage=0;renderBrain();});
+    if(graphTopic) pages.appendChild(el('span','',graphTopic));
+    if(totalPages>1){action('Anterior',function(){questionPage--;renderBrain();}).disabled=questionPage===0;pages.appendChild(el('span','',(questionPage+1)+' / '+totalPages));action('Próxima',function(){questionPage++;renderBrain();}).disabled=questionPage+1>=totalPages;}
+    var visible=list.slice(questionPage*60,(questionPage+1)*60);
+    function select(q){selectedQuestion=q.id;renderBrain();var detail=$('question-detail');if(detail.scrollIntoView) detail.scrollIntoView({block:'nearest'});}
+    G.draw(svg,G.network(visible,state.memories.filter(function(n){return !query || M.normalize(n.content).indexOf(query)!==-1;}).slice(0,40)),function(node){
+      if(node.pair) select(node.pair.question);
+      else if(node.note) openMemory(node.note);
+      else {graphTopic=node.label;questionPage=0;renderBrain();}
+    },selectedQuestion,false);
+    visible.forEach(function(p){var btn=el('button','question-index-item',p.question.content);btn.onclick=function(){select(p.question);};index.appendChild(btn);});
+    if(!list.length) index.appendChild(el('p','',all.length?'Nenhuma pergunta encontrada.':'Faça uma pergunta na Central para iniciar o mapa.'));
     var detail = $('question-detail'), selected = null; wipe(detail); detail.hidden = true;
     for (i = 0; i < all.length; i++) if (all[i].question.id === selectedQuestion) selected = all[i];
     if (!selected) return;
@@ -188,9 +151,11 @@
   function renderSettings() {
     if (window.AguirraVoice.setScope) window.AguirraVoice.setScope(user ? 'user:' + user.id : 'guest');
     $('setting-low-power').checked = !!preferences.low_power; $('setting-voice').checked = !!preferences.voice; $('setting-memory').checked = state.settings.memory_enabled !== false;
-    $('settings-storage').textContent = user ? (localApi ? 'O núcleo e o histórico ficam no seu computador. O tablet e o PC acessam a mesma memória pela rede local, sem banco pago.' : 'Sua memória está sincronizada na sua conta. O mapa e o histórico aparecem nos aparelhos em que você entrar.') : 'Você pode perguntar sem conta. O histórico e o núcleo ficam neste navegador. A conta é opcional para sincronizar memórias entre aparelhos.';
+    $('settings-storage').textContent = user ? (localApi ? 'O núcleo e o histórico ficam no seu computador. O tablet e o PC acessam a mesma memória pela rede local, sem banco pago.' : 'Sua memória está sincronizada na sua conta. O mapa e o histórico aparecem nos aparelhos em que você entrar.') : 'Seu núcleo de visitante fica no Supabase. Este navegador usa uma sessão privada para acessá-lo. Entre com Google para acessar a mesma conta em outros aparelhos.';
     $('settings-login').textContent = user ? 'Gerenciar meu acesso ↗' : (localApi ? 'Conectar ao meu computador ↗' : 'Entrar ou criar conta ↗');
-    $('sync-local').hidden = !user || !(readJSON(storageKey, empty()).memories || []).length;
+    var legacy = readJSON(storageKey,empty());
+    $('sync-local').hidden = !(legacy.messages.length || legacy.memories.length || (user && visitorAvailable));
+    $('sync-local').textContent = 'Importar histórico anterior para este núcleo';
     $('compatibility-description').textContent = oldAndroid ? 'Android antigo detectado. Recomendamos o modo econômico. Voz e tela cheia dependem do navegador.' : 'O modo econômico funciona em qualquer aparelho. Os recursos de voz aparecem conforme a compatibilidade do navegador.';
     document.body.className = preferences.low_power ? 'low-power' : '';
     iconLabel($('power-shortcut'), 'power', preferences.low_power ? 'Modo econômico ativo' : 'Modo econômico');
@@ -204,7 +169,7 @@
   function excludeLocalMemory(m) { if (!m.source_message_id) return; for (var i = 0; i < state.messages.length; i++) if (state.messages[i].id === m.source_message_id) state.messages[i].exclude_context = true; }
   function deleteMemory(m) {
     if (!window.confirm('Esquecer esta memória? Ela deixará de entrar nas próximas respostas. O texto original continua no histórico até você apagá-lo.')) return;
-    if (!user) { window.AguirraVoice.clearCache(); excludeLocalMemory(m); state.memories = state.memories.filter(function (x) { return x.id !== m.id; }); saveLocal(); render(); return; }
+    window.AguirraVoice.clearCache();
     request('DELETE', '/api/memory?id=' + encodeURIComponent(m.id), null, function (err) { if (err) toast(err.message); else loadData(); });
   }
   var lastReply = '', lastReplyId = null, voiceActive = false, voiceLoading = false, listening = false, orbPulse = 0;
@@ -247,6 +212,26 @@
     ctx.globalAlpha = 1; orbPulse *= .93;
   }
   function startOrb() { if (orbTimer) { clearTimeout(orbTimer); orbTimer = null; } drawOrb(orbPhase); var reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches; if (activeView !== 'home' || document.hidden || reduced || (preferences.low_power && !voiceActive && !voiceLoading && !busy && !listening && !micProcessing)) return; orbPhase += .045; orbTimer = setTimeout(startOrb, preferences.low_power ? 100 : 33); }
+  function importPrevious() {
+    if (importing) return;
+    var legacy = readJSON(storageKey,empty()), raw;
+    try { raw=localStorage.getItem(storageKey); } catch(e) { raw=null; }
+    var messages=(legacy.messages || []).slice(), memories=(legacy.memories || []).slice();
+    importing=true;
+    function failed(err) { importing=false; toast(err.message); }
+    function batch() {
+      if(messages.length || memories.length) {
+        request('POST','/api/import-graph',{messages:messages.splice(0,8),memories:memories.splice(0,8)},function(err){if(err) failed(err); else batch();});
+        return;
+      }
+      if(raw) try { if(localStorage.getItem(storageKey)===raw) localStorage.removeItem(storageKey); } catch(e) {}
+      if(user && visitorAvailable) {
+        request('POST','/api/adopt-visitor',{},function(err){if(err){failed(err);return;} visitorAvailable=false; finish();});
+      } else finish();
+    }
+    function finish(){importing=false;loadData(function(err){if(!err)toast('Histórico sincronizado no Supabase.');});}
+    batch();
+  }
   function bind() {
     var buttons = document.querySelectorAll('[data-view],[data-open]'), i;
     for (i = 0; i < buttons.length; i++) buttons[i].onclick = function () { go(this.getAttribute('data-view') || this.getAttribute('data-open')); };
@@ -259,23 +244,23 @@
     $('google-login').onclick = function () { if (!googleLoginReady) return; this.disabled = true; $('google-login-status').textContent = 'Conectando ao Google…'; request('POST', '/api/google', {}, function (err, result) { if (err) { $('google-login').disabled = false; $('google-login-status').textContent = err.message; return; } window.location.href = result.url; }); };
     $('toggle-auth').onclick = function () { authMode = authMode === 'login' ? 'register' : 'login'; $('auth-title').textContent = authMode === 'login' ? 'Entre no seu espaço.' : 'Crie seu espaço pessoal.'; $('auth-submit').textContent = authMode === 'login' ? 'Entrar' : 'Criar conta'; $('toggle-auth').textContent = authMode === 'login' ? 'Ainda não tenho conta ↗' : 'Já tenho uma conta ↗'; $('auth-feedback').textContent = ''; };
     $('auth-form').onsubmit = function (event) { event.preventDefault(); $('auth-submit').disabled = true; $('auth-feedback').textContent = 'Conectando…'; request('POST', '/api/auth', { mode: authMode, email: $('auth-email').value, password: $('auth-password').value }, function (err, data) { $('auth-submit').disabled = false; $('auth-password').value = ''; if (err) { $('auth-feedback').textContent = err.message; return; } if (!data.user) { $('auth-feedback').textContent = data.message || 'Confira seu e-mail para confirmar a conta e depois entre aqui.'; return; } user = data.user; lastDataSync = 0; state = empty(); window.AguirraVoice.stop(); window.AguirraVoice.clearCache(); hideCaption(); closeModal('auth-modal'); loadData(); setStatus('Conta conectada'); toast('Seu espaço está conectado.'); }); };
-    $('logout-button').onclick = function () { request('POST', '/api/logout', {}, function (err) { if (err) { toast(err.message); return; } user = null; lastDataSync = 0; window.AguirraVoice.stop(); window.AguirraVoice.clearCache(); hideCaption(); state = readJSON(storageKey, empty()); closeModal('auth-modal'); render(); setStatus('Neste aparelho'); }); };
-    $('memory-form').onsubmit = function (event) { event.preventDefault(); var content = $('memory-content').value.trim(); if (!content) return; if (M.sensitive(content)) { $('memory-feedback').textContent = 'Guarde preferências e objetivos. Credenciais e informações sensíveis não entram no núcleo.'; return; } var m = { category: $('memory-category').value, content: content, key: M.normalize(content).slice(0, 100), origin: 'manual' }; if (!user) { if (editingMemory) { var old = state.memories.filter(function (x) { return x.id === editingMemory; })[0]; if (old) m.key = old.key; } putLocalMemory(m); saveLocal(); render(); closeModal('memory-modal'); toast('Conexão guardada no seu núcleo.'); return; } request('POST', '/api/memory', { id: editingMemory, category: m.category, content: m.content }, function (err) { if (err) { $('memory-feedback').textContent = err.message; return; } closeModal('memory-modal'); loadData(); toast('Memória sincronizada.'); }); };
+    $('logout-button').onclick = function () { request('POST', '/api/logout', {}, function (err) { if (err) { toast(err.message); return; } user = null; lastDataSync = 0; window.AguirraVoice.stop(); window.AguirraVoice.clearCache(); hideCaption(); state = empty(); closeModal('auth-modal'); render(); setStatus('Núcleo na nuvem'); loadData(); }); };
+    $('memory-form').onsubmit = function (event) { event.preventDefault(); var content = $('memory-content').value.trim(); if (!content) return; if (M.sensitive(content)) { $('memory-feedback').textContent = 'Guarde preferências e objetivos. Credenciais e informações sensíveis não entram no núcleo.'; return; } var m = { category: $('memory-category').value, content: content, key: M.normalize(content).slice(0, 100), origin: 'manual' }; request('POST', '/api/memory', { id: editingMemory, category: m.category, content: m.content }, function (err) { if (err) { $('memory-feedback').textContent = err.message; return; } closeModal('memory-modal'); loadData(); toast('Memória sincronizada.'); }); };
     $('setting-low-power').onchange = function () { preferences.low_power = this.checked; savePreferences(); renderSettings(); startOrb(); }; $('power-shortcut').onclick = function () { preferences.low_power = !preferences.low_power; savePreferences(); renderSettings(); startOrb(); toast(preferences.low_power ? 'Modo econômico ativado.' : 'Animação ativada.'); };
     $('setting-voice').onchange = function () { preferences.voice = this.checked; savePreferences(); if (!this.checked) window.AguirraVoice.stop(); };
     $('setting-voice-name').onchange = function () { preferences.voice_name = this.value; window.AguirraVoice.setVoice(this.value); savePreferences(); };
     $('test-voice').onclick = function () { window.AguirraVoice.speak('Olá. Eu sou o Aguirra, seu assistente pessoal. Estou pronto para conversar com você.', null, true); };
-    $('setting-memory').onchange = function () { var enabled = this.checked; window.AguirraVoice.clearCache(); if (!user) { state.settings.memory_enabled = enabled; saveLocal(); return; } request('POST', '/api/settings', { memory_enabled: enabled }, function (err) { if (err) { $('setting-memory').checked = state.settings.memory_enabled !== false; toast(err.message); } else state.settings.memory_enabled = enabled; }); };
+    $('setting-memory').onchange = function () { var enabled = this.checked; window.AguirraVoice.clearCache(); request('POST', '/api/settings', { memory_enabled: enabled }, function (err) { if (err) { $('setting-memory').checked = state.settings.memory_enabled !== false; toast(err.message); } else state.settings.memory_enabled = enabled; }); };
     $('stop-voice').onclick = function () { window.AguirraVoice.stop(); };
-    $('sync-local').onclick = function () { var local = readJSON(storageKey, empty()); if (!local.memories.length) return; request('POST', '/api/import', { memories: local.memories.map(function (m) { return { category: m.category, content: m.content }; }) }, function (err) { if (err) toast(err.message); else { loadData(); toast('Memórias importadas. O histórico local permanece neste aparelho.'); } }); };
+    $('sync-local').onclick = importPrevious;
     $('export-data').onclick = function () { var data = JSON.stringify({ format: 'aguirra-export-v1', exported_at: new Date().toISOString(), data: state }, null, 2), url; try { var blob = new Blob([data], { type: 'application/json' }); url = (window.URL || window.webkitURL).createObjectURL(blob); var a = el('a', '', 'Baixar dados'); a.href = url; a.download = 'aguirra-meus-dados.json'; document.body.appendChild(a); a.click(); document.body.removeChild(a); setTimeout(function () { (window.URL || window.webkitURL).revokeObjectURL(url); }, 20000); } catch (e) { var exportWindow = window.open('', '_blank'); if (exportWindow) { exportWindow.document.body.appendChild(exportWindow.document.createElement('pre')).textContent = data; } else toast('Seu navegador bloqueou a exportação. Tente pelo computador.'); } };
-    $('clear-data').onclick = function () { if (busy) { toast('Aguarde a resposta antes de apagar os dados.'); return; } if (!window.confirm('Apagar todo o histórico, assuntos e memórias' + (user ? ' da sua conta em todos os aparelhos' : ' deste aparelho') + '? Essa ação não pode ser desfeita.')) return; window.AguirraVoice.clearCache(); if (!user) { state = empty(); saveLocal(); render(); toast('Seu núcleo foi limpo.'); return; } request('DELETE', '/api/data', null, function (err) { if (err) toast(err.message); else { loadData(); toast('Histórico e núcleo apagados da sua conta.'); } }); };
+    $('clear-data').onclick = function () { if (busy) { toast('Aguarde a resposta antes de apagar os dados.'); return; } if (!window.confirm('Apagar todo o histórico, assuntos e memórias' + ' do seu núcleo no Supabase' + '? Essa ação não pode ser desfeita.')) return; window.AguirraVoice.clearCache(); request('DELETE', '/api/data', null, function (err) { if (err) toast(err.message); else { loadData(); toast('Histórico e núcleo apagados da sua conta.'); } }); };
     $('fullscreen-button').onclick = function () { var root = document.documentElement, enter = root.requestFullscreen || root.webkitRequestFullscreen || root.mozRequestFullScreen; var exit = document.exitFullscreen || document.webkitExitFullscreen || document.mozCancelFullScreen; if (document.fullscreenElement || document.webkitFullscreenElement) { if (exit) exit.call(document); } else if (enter) { var p = enter.call(root); if (p && p.catch) p.catch(function () { toast('O navegador não permitiu a tela cheia.'); }); } else toast('Este navegador não oferece tela cheia.'); };
-    document.addEventListener('visibilitychange', function () { if (document.hidden) window.AguirraMicrophone.cancel(); else if (user && !busy && Date.now() - lastDataSync > 60000) loadData(); startOrb(); });
+    document.addEventListener('visibilitychange', function () { if (document.hidden) window.AguirraMicrophone.cancel(); else if (sessionReady && !busy && Date.now() - lastDataSync > 60000) loadData(); startOrb(); });
     document.addEventListener('keydown', function (event) { if (event.keyCode === 27) { closeModal('auth-modal'); closeModal('memory-modal'); } var modal = !$('auth-modal').hidden ? $('auth-modal') : (!$('memory-modal').hidden ? $('memory-modal') : null); if (event.keyCode !== 9 || !modal) return; var all = modal.querySelectorAll('button,input,textarea,select'), nodes = [], k; for (k = 0; k < all.length; k++) if (!all[k].hidden && all[k].offsetWidth > 0) nodes.push(all[k]); if (!nodes.length) return; if (event.shiftKey && document.activeElement === nodes[0]) { event.preventDefault(); nodes[nodes.length - 1].focus(); } else if (!event.shiftKey && document.activeElement === nodes[nodes.length - 1]) { event.preventDefault(); nodes[0].focus(); } });
   }
   function setStatus(text) { wipe($('connection-status')); $('connection-status').appendChild(el('i')); $('connection-status').appendChild(document.createTextNode(text)); }
-  state = readJSON(storageKey, empty()); if (!state.memories || !state.messages || !state.threads || !state.topics || !state.settings) state = empty();
+
   window.AguirraVoice.configure({ voice: preferences.voice_name,
     onStatus: function (text) { $('voice-status').textContent = text; },
     onNotice: function (text) { $('voice-status').textContent = text; $('voice-hint').textContent = text + (lastReply ? ' A resposta está no Histórico.' : ''); $('voice-hint').hidden = false; },
@@ -286,5 +271,5 @@
   if (window.speechSynthesis) window.speechSynthesis.onvoiceschanged = populateVoices;
   if (/[?&]auth=google-failed(?:&|$)/.test(window.location.search)) { toast('Não foi possível concluir a entrada com Google. Tente novamente.'); if (window.history && window.history.replaceState) window.history.replaceState(null, '', '/'); }
   $('voice-status').textContent = 'Escolha ElevenLabs para a voz natural ou uma voz do aparelho como alternativa.';
-  request('GET', '/api/session', null, function (err, data) { sessionReady = true; if (err) { setStatus('Neste aparelho'); $('server-capabilities').textContent = 'Servidor indisponível. Memória local, mapa e histórico continuam funcionando.'; return; } user = data.user || null; localApi = !!data.local; voiceServer = !!data.tts_server; elevenReady = !!data.elevenlabs_ready; window.AguirraMicrophone.setServer(!!data.transcription_ready); $('elevenlabs-status').textContent = elevenReady ? 'ElevenLabs disponível. A geração só é liberada no plano Free, sem excedentes.' : 'ElevenLabs aguarda a chave no servidor. Até lá, a voz do aparelho é usada como alternativa.'; googleLoginReady = !!data.google_login; setStatus(user ? (localApi ? 'Computador conectado' : 'Conta conectada') : 'Neste aparelho'); $('server-capabilities').textContent = 'Perguntas sem conta. ' + (data.google_ready ? 'Conversa com Gemini gratuito. Fontes públicas por Wikipedia e notícias RSS. A pesquisa integrada do Google está desativada.' : (localApi ? 'IA local com Ollama. ' : 'Conversa gratuita ainda indisponível. ') + 'Manchetes disponíveis por RSS; isso não é uma pesquisa completa na web.'); if (user) loadData(); else render(); });
+  request('GET', '/api/session', null, function (err, data) { if (err) { setStatus('Sem conexão'); $('server-capabilities').textContent = 'Reconecte para acessar seu núcleo no Supabase.'; return; } visitorAvailable = !!data.visitor_available; user = data.user || null; localApi = !!data.local; voiceServer = !!data.tts_server; elevenReady = !!data.elevenlabs_ready; window.AguirraMicrophone.setServer(!!data.transcription_ready); $('elevenlabs-status').textContent = elevenReady ? 'ElevenLabs disponível. A geração só é liberada no plano Free, sem excedentes.' : 'ElevenLabs aguarda a chave no servidor. Até lá, a voz do aparelho é usada como alternativa.'; googleLoginReady = !!data.google_login; setStatus(user ? (localApi ? 'Computador conectado' : 'Conta conectada') : 'Núcleo na nuvem'); $('server-capabilities').textContent = 'Perguntas sem conta. ' + (data.google_ready ? 'Conversa com Gemini gratuito. Fontes públicas por Wikipedia e notícias RSS. A pesquisa integrada do Google está desativada.' : (localApi ? 'IA local com Ollama. ' : 'Conversa gratuita ainda indisponível. ') + 'Manchetes disponíveis por RSS; isso não é uma pesquisa completa na web.'); loadData(function(error){sessionReady=!error; if(!error && !user && (readJSON(storageKey,empty()).messages.length || readJSON(storageKey,empty()).memories.length)) importPrevious();}); });
 }());
