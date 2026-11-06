@@ -83,16 +83,21 @@
       saveLocal();
     }
     setBusy(true);
+    // Identity is the same on the device and server. Speak now while the signed-in record is saved.
+    var immediateIdentity = !guest && M.identityAnswer(text);
+    if (immediateIdentity) speak(immediateIdentity, { id: null });
     request('POST', '/api/ask', payload, function (err, result) {
       setBusy(false);
       if (err) {
+        if (immediateIdentity) { toast('Não consegui confirmar o registro desta pergunta no histórico. ' + err.message); loadData(); return; }
         addMessage('assistant', err.message, true); toast(err.message);
         if (guest) { saveLocal(); render(); speak(err.message); }
         else { speak(err.message, { id: null }); loadData(); }
         return;
       }
       if (guest) { var reply = addMessage('assistant', result.reply); pending.reply_id = reply.id; reply.sources = result.sources || []; reply.search_entry_point = result.search_entry_point || null; reply.mode = result.mode; saveLocal(); render(); speak(result.reply); return; }
-      speak(result.reply, { id: result.answer_id || null });
+      if (!immediateIdentity) speak(result.reply, { id: result.answer_id || null });
+      else if (lastReply === window.AguirraVoice.cleanText(result.reply)) lastReplyId = result.answer_id || null;
       loadData(function () { if (result.learned) toast('Nova conexão guardada no seu núcleo.'); });
     });
   }
@@ -172,7 +177,7 @@
   }
   var lastReply = '', lastReplyId = null, voiceActive = false, voiceLoading = false, listening = false, orbPulse = 0;
   function updateOrbState() {
-    var mode = listening ? 'listening' : (busy || micProcessing || voiceLoading ? 'thinking' : (voiceActive ? 'speaking' : 'idle'));
+    var mode = listening ? 'listening' : (voiceActive ? 'speaking' : (busy || micProcessing || voiceLoading ? 'thinking' : 'idle'));
     $('orb-stage').className = 'orb-stage is-' + mode;
     $('assistant-status').textContent = { listening: 'ESTOU OUVINDO', thinking: 'CONECTANDO IDEIAS', speaking: 'AGUIRRA FALANDO', idle: 'PRONTO PARA VOCÊ' }[mode];
     $('stop-response').hidden = !voiceActive && !voiceLoading; startOrb();
