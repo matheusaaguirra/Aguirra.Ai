@@ -1,8 +1,9 @@
 import { defineChannel, GET, POST, DELETE, type RouteHandlerArgs } from "eve/channels";
+import answerCache from "../../shared/answer-cache.cjs";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import { AppError, authFetch, config, db, getSession, loadData, safeOrigin, sessionCookies, type Session } from "../lib/db";
-import { categories, extract, normalize, redact, relevant, sensitive, topics, type Memory } from "../lib/memory";
+import { AppError, authFetch, config, db, getSession, loadData, safeOrigin, sessionCookies, type Session } from "../lib/db.ts";
+import { categories, extract, normalize, redact, relevant, sensitive, topics, type Memory } from "../lib/memory.ts";
 import { localLogout, localMode } from "../lib/local-store.ts";
 import { answerQuestion, guestInput, guestContext, guestLearned } from "../lib/answers.ts";
 import { googleReady } from "../lib/google.ts";
@@ -40,31 +41,34 @@ export async function guestChat(request: Request, args: RouteHandlerArgs) {
   const result = await answerQuestion(redact(input.message), guestContext(input), guestLearned(input));
   return json({ ...result, learned: guestLearned(input).length > 0, guest: true });
 }
-async function chat(request: Request, args: RouteHandlerArgs, session: Session) {
-  const input = z.object({ message: z.string().trim().min(1).max(4000), thread_id: uuid.nullish(), request_id: uuid }).parse(await body(request));
+export async function chat(request: Request, args: RouteHandlerArgs, session: Session) {
+  const input = z.object({ message: z.string().trim().min(1).max(4000), thread_id: uuid.nullish(), request_id: uuid, force_refresh: z.boolean().default(false) }).parse(await body(request));
   const duplicate = await db(session, `aguirra_messages?id=eq.${input.request_id}&select=thread_id,reply_id`);
   if (duplicate.length) {
-    if (duplicate[0].reply_id) { const replies = await db(session, `aguirra_messages?id=eq.${duplicate[0].reply_id}&select=content,sources,search_entry_point`); return json({ thread_id: duplicate[0].thread_id, reply: replies[0]?.content || "Pedido já processado.", sources: replies[0]?.sources || [], search_entry_point: replies[0]?.search_entry_point, learned: false }, 200, session.cookies); }
+    if (duplicate[0].reply_id) { const replies = await db(session, `aguirra_messages?id=eq.${duplicate[0].reply_id}&select=id,content,sources,search_entry_point,cache_meta`); return json({ answer_id: replies[0]?.id, cache_meta: replies[0]?.cache_meta, thread_id: duplicate[0].thread_id, reply: replies[0]?.content || "Pedido já processado.", sources: replies[0]?.sources || [], search_entry_point: replies[0]?.search_entry_point, learned: false }, 200, session.cookies); }
     throw new AppError(409, "Este pedido já foi recebido. Aguarde a conclusão ou confira o histórico.");
   }
   const quota = await db<boolean>(session, "rpc/aguirra_claim_request", "POST", {});
   if (!quota) throw new AppError(429, "Seu limite desta hora foi atingido. Aguarde antes de enviar novas perguntas.");
   const message = redact(input.message), threadId = await assistantLog(session);
-  await db(session, "aguirra_messages", "POST", { id: input.request_id, user_id: session.user.id, thread_id: threadId, role: "user", content: message });
   // Identity needs no memories or past replies, but remains recorded in the same history.
   const directIdentity = identityAnswer(message);
-  const data = directIdentity ? null : await loadData(session), learned = !data || data.settings.memory_enabled === false ? [] : extract(message);
+  const [, data] = await Promise.all([db(session, "aguirra_messages", "POST", { id: input.request_id, user_id: session.user.id, thread_id: threadId, role: "user", content: message }), directIdentity ? Promise.resolve(null) : loadData(session)]);
+  const learned = !data || data.settings.memory_enabled === false ? [] : extract(message);
   for (const memory of learned) await db(session, "aguirra_memories?on_conflict=user_id,key", "POST", { user_id: session.user.id, ...memory, source_message_id: input.request_id, updated_at: new Date().toISOString() }, "resolution=merge-duplicates,return=representation");
-  for (const name of directIdentity ? [] : topics(message)) await db(session, "rpc/aguirra_touch_topic", "POST", { topic_name: name });
+  await Promise.all((directIdentity ? [] : topics(message)).map(name => db(session, "rpc/aguirra_touch_topic", "POST", { topic_name: name })));
   const allMemories: Memory[] = !data ? [] : learned.length ? await db(session, "aguirra_memories?select=*&order=updated_at.desc&limit=500") : data.memories;
   const context = intent(message) === "memory" ? allMemories.slice(0, 50) : relevant(allMemories, message);
   const previous = data ? assistantHistory(data.messages, input.request_id) : [];
   try {
-    const { reply, sources, search_entry_point, mode } = await answerQuestion(message, { history: previous, memories: context.map(m => ({ category: m.category, content: m.content })) }, learned);
+    const reused = !input.force_refresh && data ? answerCache.find(message, data.messages, allMemories, data.settings.memory_enabled) : null;
+    const result = reused ? { reply: reused.answer.content, sources: reused.answer.sources || [], search_entry_point: null, mode: "answer_memory" } : await answerQuestion(message, { history: previous, memories: context.map(m => ({ category: m.category, content: m.content })) }, learned);
+    const { reply, sources, search_entry_point, mode } = result;
+    const cache_meta = reused ? { ...reused.answer.cache_meta, reused_from: reused.question.id } : answerCache.makeMeta(message, reply, mode || "", allMemories, data?.settings.memory_enabled);
     const replyId = randomUUID();
-    await db(session, "aguirra_messages", "POST", { id: replyId, user_id: session.user.id, thread_id: threadId, role: "assistant", content: reply, sources, search_entry_point: search_entry_point || null });
+    await db(session, "aguirra_messages", "POST", { id: replyId, user_id: session.user.id, thread_id: threadId, role: "assistant", content: reply, cache_meta, sources, search_entry_point: search_entry_point || null });
     await db(session, `aguirra_messages?id=eq.${input.request_id}`, "PATCH", { reply_id: replyId });
-    return json({ thread_id: threadId, answer_id: replyId, reply, learned: learned.length > 0, sources, search_entry_point, mode }, 200, session.cookies);
+    return json({ cached: !!reused, cache_meta, thread_id: threadId, answer_id: replyId, reply, learned: learned.length > 0, sources, search_entry_point, mode }, 200, session.cookies);
   } catch (error) {
     const message = error instanceof AppError ? error.message : "Não consegui concluir a resposta. No modo local, confira se o Ollama está aberto e o modelo foi baixado. Seu pedido e as memórias já formadas foram salvos.";
     await db(session, "aguirra_messages", "POST", { user_id: session.user.id, thread_id: threadId, role: "assistant", content: message, failed: true });

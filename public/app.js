@@ -1,8 +1,8 @@
 (function () {
   'use strict';
-  var M = window.AguirraMemory, storageKey = 'aguirra.local.v1', preferencesKey = 'aguirra.preferences.v1';
+  var M = window.AguirraMemory, A = window.AguirraAnswers, storageKey = 'aguirra.local.v1', preferencesKey = 'aguirra.preferences.v1';
   var user = null, localApi = false, voiceServer = false, googleLoginReady = false, sessionReady = false, busy = false, activeView = 'home', memoryFilter = 'all', editingMemory = null, authMode = 'login', toastTimer, modalFocus = null;
-  var elevenReady = false, micProcessing = false;
+  var elevenReady = false, micProcessing = false, lastDataSync = 0, questionPage = 0, selectedQuestion = null;
   var oldAndroid = /Android 4\./.test(navigator.userAgent), state = empty(), preferences = readJSON(preferencesKey, { low_power: oldAndroid, voice: true });
   if (preferences.voice_provider_version !== 1) { preferences.voice_name = '__elevenlabs__'; preferences.voice_provider_version = 1; savePreferences(); }
   if (preferences.voice_version !== 2) { preferences.voice = true; preferences.voice_version = 2; savePreferences(); }
@@ -41,10 +41,10 @@
   function pad(n) { return n < 10 ? '0' + n : String(n); }
   function tick() { var d = new Date(), months = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro']; $('clock-label').textContent = localDate(d, true); $('date-label').textContent = d.getDate() + ' de ' + months[d.getMonth()] + ', ' + d.getFullYear(); }
   function render() {
-    var count = state.memories.length;
+    var points = A.pairs(state.messages), count = state.memories.length + points.length;
     $('home-memory-count').textContent = pad(count); $('nav-memory-count').textContent = String(count);
-    $('context-description').textContent = count ? 'Preferências, objetivos e ideias que dão contexto às suas próximas conversas.' : 'Seu núcleo começa com uma conversa. Conte uma preferência ou algo que queira guardar.';
-    $('last-connection').textContent = count ? state.memories[0].content : 'As ideias que você guardar aparecerão aqui.';
+    $('context-description').textContent = count ? points.length + (points.length === 1 ? ' pergunta e ' : ' perguntas e ') + state.memories.length + (state.memories.length === 1 ? ' memória guardada no seu núcleo.' : ' memórias guardadas no seu núcleo.') : 'Seu núcleo começa com uma conversa. Conte uma preferência ou algo que queira guardar.';
+    $('last-connection').textContent = state.memories.length ? state.memories[0].content : (points.length ? points[points.length - 1].question.content : 'As ideias que você guardar aparecerão aqui.');
     $('account-name').textContent = user ? (user.email || 'Sua conta') : 'Seu espaço pessoal'; wipe($('avatar')); $('avatar').appendChild(icon('user')); $('account-state').textContent = user ? (localApi ? 'Memória no seu computador' : 'Memória sincronizada') : 'Memória neste aparelho';
     renderSettings(); if (activeView === 'brain') renderBrain(); if (activeView === 'history') renderHistory();
   }
@@ -57,6 +57,7 @@
   function putLocalMemory(m, messageId) {
     var index = -1; for (var i = 0; i < state.memories.length; i++) if (state.memories[i].key === m.key) index = i;
     m.id = index >= 0 ? state.memories[index].id : uid(); m.updated_at = new Date().toISOString(); m.source_message_id = messageId || null;
+    window.AguirraVoice.clearCache();
     if (index >= 0) { var previous = state.memories[index]; if (previous.source_message_id && previous.source_message_id !== messageId) excludeLocalMemory(previous); state.memories.splice(index, 1); } state.memories.unshift(m);
   }
   function localAnswer(text, learned) {
@@ -67,16 +68,17 @@
     if (kind === 'memory') return state.memories.length ? 'Este é o seu núcleo neste aparelho:\n\n' + state.memories.map(function (m) { return '• ' + m.content; }).join('\n') + '\n\nVocê pode editar ou esquecer qualquer item no Mapa cerebral.' : 'Seu núcleo ainda está vazio. Conte uma preferência ou guarde uma memória diretamente no mapa.';
     return null;
   }
-  function send(text) {
+  function send(text, forceRefresh) {
     text = String(text || '').trim(); if (!text || busy || micProcessing) return; if (!sessionReady) { toast('Conectando ao Aguirra. Envie novamente em um instante.'); return; }
     if (text.length > 4000) { toast('Sua mensagem deve ter até 4.000 caracteres.'); return; }
     text = M.redact(text); window.AguirraVoice.prime(); window.AguirraMicrophone.cancel(); window.AguirraVoice.stop(); go('home'); $('voice-hint').hidden = true; $('home-input').value = '';
-    var guest = !user;
-    ensureLog(); var pending = addMessage('user', text), payload = { message: text, request_id: pending.id };
+    var guest = !user, reused = !forceRefresh && (guest || Date.now() - lastDataSync < 60000) ? A.find(text, state.messages, state.memories, state.settings.memory_enabled) : null;
+    ensureLog(); var pending = addMessage('user', text), payload = { message: text, request_id: pending.id, force_refresh: !!forceRefresh };
     if (guest) {
       learn(text, pending.id);
       var answer = localAnswer(text, state.settings.memory_enabled !== false ? M.extract(text) : []);
-      if (answer) { addMessage('assistant', answer); saveLocal(); render(); speak(answer); return; }
+      if (answer) { var direct = addMessage('assistant', answer); pending.reply_id = direct.id; saveLocal(); render(); speak(answer); return; }
+      if (reused) { var remembered = addMessage('assistant', reused.answer.content); remembered.sources = reused.answer.sources || []; remembered.mode = 'answer_memory'; remembered.cache_meta = copyCacheMeta(reused); pending.reply_id = remembered.id; saveLocal(); render(); speak(remembered.content, remembered); return; }
       payload.history = state.messages.filter(function (m) { return m.id !== pending.id && !m.failed && !m.exclude_context; }).slice(-6).map(function (m) { return { role: m.role, text: m.content.slice(0, 1200) }; });
       payload.memories = state.settings.memory_enabled === false ? [] : state.memories.slice(0, 50).map(function (m) { return { category: m.category, content: m.content }; });
       payload.memory_enabled = state.settings.memory_enabled !== false;
@@ -85,24 +87,25 @@
     setBusy(true);
     // Identity is the same on the device and server. Speak now while the signed-in record is saved.
     var immediateIdentity = !guest && M.identityAnswer(text);
-    if (immediateIdentity) speak(immediateIdentity, { id: null });
+    if (immediateIdentity || reused) speak(immediateIdentity || reused.answer.content, { id: null });
     request('POST', '/api/ask', payload, function (err, result) {
       setBusy(false);
       if (err) {
-        if (immediateIdentity) { toast('Não consegui confirmar o registro desta pergunta no histórico. ' + err.message); loadData(); return; }
+        if (immediateIdentity || reused) { toast('Não consegui confirmar o registro desta pergunta no histórico. ' + err.message); loadData(); return; }
         addMessage('assistant', err.message, true); toast(err.message);
         if (guest) { saveLocal(); render(); speak(err.message); }
         else { speak(err.message, { id: null }); loadData(); }
         return;
       }
-      if (guest) { var reply = addMessage('assistant', result.reply); pending.reply_id = reply.id; reply.sources = result.sources || []; reply.search_entry_point = result.search_entry_point || null; reply.mode = result.mode; saveLocal(); render(); speak(result.reply); return; }
-      if (!immediateIdentity) speak(result.reply, { id: result.answer_id || null });
+      if (guest) { var reply = addMessage('assistant', result.reply); pending.reply_id = reply.id; reply.sources = result.sources || []; reply.search_entry_point = result.search_entry_point || null; reply.mode = result.mode; reply.cache_meta = A.makeMeta(text, result.reply, result.mode, state.memories, state.settings.memory_enabled); saveLocal(); render(); speak(result.reply); return; }
+      if (!immediateIdentity && !reused) speak(result.reply, { id: result.answer_id || null });
       else if (lastReply === window.AguirraVoice.cleanText(result.reply)) lastReplyId = result.answer_id || null;
       loadData(function () { if (result.learned) toast('Nova conexão guardada no seu núcleo.'); });
     });
   }
+  function copyCacheMeta(match) { var m = match.answer.cache_meta; return { version: m.version, key: m.key, context: m.context, expires_at: m.expires_at, generated_at: m.generated_at, reused_from: match.question.id }; }
   function setBusy(value) { busy = value; $('home-submit').disabled = value; $('home-input').disabled = value; if (value) hideCaption(); updateOrbState(); }
-  function loadData(callback) { request('GET', '/api/data', null, function (err, data) { if (err) { toast(err.message); if (callback) callback(err); return; } state = data; render(); if (callback) callback(); }); }
+  function loadData(callback) { request('GET', '/api/data', null, function (err, data) { if (err) { toast(err.message); if (callback) callback(err); return; } var oldContext = A.contextKey(state.memories, state.settings.memory_enabled); state = data; lastDataSync = Date.now(); if (oldContext !== A.contextKey(state.memories, state.settings.memory_enabled)) window.AguirraVoice.clearCache(); render(); if (callback) callback(); }); }
   function renderHistory() {
     var list = $('history-list'), query = M.normalize($('history-search').value), found = 0; wipe(list);
     for (var i = state.messages.length - 1; i >= 0; i--) {
@@ -116,7 +119,7 @@
         var card = el('article', 'history-card'), details = el('details', 'history-record'), summary = el('summary', '');
         summary.appendChild(el('span', 'section-label', localDate(q.created_at) + ' · ' + localDate(q.created_at, true))); summary.appendChild(el('h3', '', q.content));
         details.appendChild(summary);
-        var answer = el('div', 'history-answer'); answer.appendChild(el('p', 'history-answer-text', r ? window.AguirraVoice.cleanText(r.content) : 'Esta pergunta foi registrada, mas não tem uma resposta salva.'));
+        var answer = el('div', 'history-answer'); if (r && r.cache_meta && r.cache_meta.reused_from) answer.appendChild(el('p', 'section-label', 'Recuperada do seu núcleo')); answer.appendChild(el('p', 'history-answer-text', r ? window.AguirraVoice.cleanText(r.content) : 'Esta pergunta foi registrada, mas não tem uma resposta salva.'));
         var sources = r && r.sources || [], links = el('div', 'sources');
         for (var k = 0; k < sources.length; k++) { if (!/^https:\/\//i.test(sources[k].url)) continue; var link = el('a', 'source-link', sources[k].title); link.href = sources[k].url; link.target = '_blank'; link.rel = 'noopener noreferrer'; links.appendChild(link); }
         if (links.childNodes.length) answer.appendChild(links);
@@ -127,24 +130,52 @@
     if (!found) list.appendChild(el('div', 'empty-state', query ? 'Nenhuma pergunta encontrada.' : 'Suas perguntas e respostas serão registradas aqui, sem criar conversas.'));
   }
   function svgEl(tag, attrs, content) { var n = document.createElementNS('http://www.w3.org/2000/svg', tag); for (var k in attrs) if (Object.prototype.hasOwnProperty.call(attrs, k)) n.setAttribute(k, attrs[k]); if (content !== undefined) n.textContent = content; return n; }
-  function renderBrain() {
-    $('brain-summary').textContent = state.memories.length + ' memórias · ' + state.topics.length + ' assuntos';
-    var svg = $('brain-svg'); wipe(svg);
-    var cats = ['profile', 'preferences', 'goals', 'projects', 'notes'], coords = [[180, 87], [526, 84], [597, 239], [366, 307], [125, 240]], i;
-    svg.appendChild(svgEl('circle', { cx: 360, cy: 174, r: 110, fill: 'none', stroke: '#2c2438', 'stroke-dasharray': '2 8' }));
-    svg.appendChild(svgEl('circle', { cx: 360, cy: 174, r: 150, fill: 'none', stroke: '#231b2d' }));
-    for (i = 0; i < cats.length; i++) {
-      var count = state.memories.filter(function (m) { return m.category === cats[i]; }).length;
-      svg.appendChild(svgEl('line', { x1: 360, y1: 174, x2: coords[i][0], y2: coords[i][1], stroke: count ? '#715d8e' : '#362d42', 'stroke-width': count ? 1.5 : 1 }));
-      var group = svgEl('g', { tabindex: '0', role: 'button', 'aria-label': M.categories[cats[i]] + ', ' + count + ' memórias', cursor: 'pointer' });
-      group.appendChild(svgEl('circle', { cx: coords[i][0], cy: coords[i][1], r: count ? 20 : 13, fill: count ? '#342b42' : '#21192b', stroke: count ? '#9b80c1' : '#4f4261' }));
-      group.appendChild(svgEl('text', { x: coords[i][0], y: coords[i][1] + 4, 'text-anchor': 'middle', fill: '#ac92d0', 'font-size': '11', 'font-family': 'monospace' }, String(count)));
-      group.appendChild(svgEl('text', { x: coords[i][0], y: coords[i][1] + 38, 'text-anchor': 'middle', fill: '#9888ad', 'font-size': '12', 'font-family': 'Arial' }, M.categories[cats[i]]));
-      (function (category, node) { node.onclick = function () { memoryFilter = category; renderBrain(); }; node.onkeydown = function (event) { if (event.keyCode === 13 || event.keyCode === 32) { event.preventDefault(); memoryFilter = category; renderBrain(); } }; }(cats[i], group)); svg.appendChild(group);
+  function renderQuestionMap() {
+    var all = A.pairs(state.messages).reverse(), query = M.normalize($('question-search').value), list = all.filter(function (p) { return !query || M.normalize(p.question.content).indexOf(query) !== -1; });
+    var totalPages = Math.max(1, Math.ceil(list.length / 10)); questionPage = Math.max(0, Math.min(questionPage, totalPages - 1));
+    $('brain-summary').textContent = all.length + (all.length === 1 ? ' pergunta · ' : ' perguntas · ') + state.memories.length + (state.memories.length === 1 ? ' memória' : ' memórias');
+    var pages = $('question-pages'); wipe(pages);
+    function pageButton(label, disabled, delta) { var b = el('button', 'quiet-button', label); b.type = 'button'; b.disabled = disabled; b.onclick = function () { questionPage += delta; renderBrain(); }; pages.appendChild(b); }
+    pageButton('Anterior', questionPage === 0, -1); pages.appendChild(el('span', '', (questionPage + 1) + ' / ' + totalPages)); pageButton('Próxima', questionPage + 1 >= totalPages, 1);
+    var visible = list.slice(questionPage * 10, questionPage * 10 + 10), svg = $('brain-svg'), index = $('question-list'), positions = {}; wipe(svg); wipe(index);
+    svg.appendChild(svgEl('circle', { cx: 360, cy: 250, r: 80, fill: 'none', stroke: '#30253d', 'stroke-dasharray': '3 9' }));
+    for (var i = 0; i < visible.length; i++) positions[visible[i].question.id] = { x: i < 5 ? 52 : 454, y: 52 + (i % 5) * 96 };
+    for (i = 0; i < visible.length; i++) {
+      var p = visible[i], position = positions[p.question.id], meta = p.answer && p.answer.cache_meta, target = meta && positions[meta.reused_from];
+      svg.appendChild(svgEl('line', { x1: 360, y1: 250, x2: position.x, y2: position.y, stroke: '#43324f', 'stroke-width': 1 }));
+      if (target) svg.appendChild(svgEl('line', { x1: target.x, y1: target.y, x2: position.x, y2: position.y, stroke: '#b08cdd', 'stroke-dasharray': '4 5', 'stroke-width': 1.5 }));
     }
-    svg.appendChild(svgEl('circle', { cx: 360, cy: 174, r: 45, fill: '#2f263b', stroke: '#9277b7', 'stroke-width': '1.5' }));
-    svg.appendChild(svgEl('text', { x: 360, y: 175, 'text-anchor': 'middle', fill: '#b89ce0', 'font-size': '15', 'font-family': 'Georgia' }, 'Aguirra'));
-    svg.appendChild(svgEl('text', { x: 360, y: 194, 'text-anchor': 'middle', fill: '#9485aa', 'font-size': '8', 'font-family': 'monospace', 'letter-spacing': '2' }, 'NÚCLEO'));
+    svg.appendChild(svgEl('circle', { cx: 360, cy: 250, r: 37, fill: '#2f243c', stroke: '#a184c6', 'stroke-width': 1.5 }));
+    svg.appendChild(svgEl('text', { x: 360, y: 255, 'text-anchor': 'middle', fill: '#dac5f5', 'font-size': 14, 'font-family': 'Arial' }, 'Aguirra'));
+    for (i = 0; i < visible.length; i++) (function (pair, number) {
+      var q = pair.question, a = pair.answer, pos = positions[q.id], ready = !!A.find(q.content, [q].concat(a ? [a] : []), state.memories, state.settings.memory_enabled);
+      var group = svgEl('g', { tabindex: '0', role: 'button', 'aria-label': 'Pergunta ' + (questionPage * 10 + number + 1) + ': ' + q.content, cursor: 'pointer' });
+      group.appendChild(svgEl('title', {}, q.content)); group.appendChild(svgEl('circle', { cx: pos.x, cy: pos.y, r: 28, fill: 'transparent' }));
+      group.appendChild(svgEl('circle', { cx: pos.x, cy: pos.y, r: selectedQuestion === q.id ? 17 : 13, fill: ready ? '#ab83df' : '#30253d', stroke: ready ? '#d9bafa' : '#7d6497', 'stroke-width': 1.5 }));
+      group.appendChild(svgEl('text', { x: pos.x + 25, y: pos.y - 3, fill: '#d4c4e7', 'font-size': 12, 'font-family': 'Arial' }, q.content.length > 28 ? q.content.slice(0, 27) + '…' : q.content));
+      group.appendChild(svgEl('text', { x: pos.x + 25, y: pos.y + 16, fill: '#8d7b9f', 'font-size': 10, 'font-family': 'Arial' }, a && a.cache_meta && a.cache_meta.reused_from ? 'Conectada a uma resposta' : (ready ? 'Resposta disponível' : 'Pergunta registrada')));
+      function select() { selectedQuestion = q.id; renderBrain(); }
+      group.onclick = select; group.onkeydown = function (event) { if (event.keyCode === 13 || event.keyCode === 32) { event.preventDefault(); select(); } }; svg.appendChild(group);
+      var button = el('button', 'question-index-item' + (selectedQuestion === q.id ? ' selected' : ''), q.content); button.type = 'button'; button.onclick = select; index.appendChild(button);
+    }(visible[i], i));
+    if (!all.length) { svg.appendChild(svgEl('text', { x: 360, y: 370, 'text-anchor': 'middle', fill: '#ad99bf', 'font-size': 14, 'font-family': 'Arial' }, 'Sua próxima pergunta será o primeiro ponto.')); }
+    if (all.length && !list.length) index.appendChild(el('p', '', 'Nenhuma pergunta encontrada.'));
+    var detail = $('question-detail'), selected = null; wipe(detail); detail.hidden = true;
+    for (i = 0; i < all.length; i++) if (all[i].question.id === selectedQuestion) selected = all[i];
+    if (!selected) return;
+    detail.hidden = false; detail.appendChild(el('span', 'section-label', 'PONTO DO SEU NÚCLEO')); detail.appendChild(el('h3', '', selected.question.content));
+    detail.appendChild(el('p', 'question-answer', selected.answer ? window.AguirraVoice.cleanText(selected.answer.content) : 'Esta pergunta ainda não tem uma resposta salva.'));
+    var sources = selected.answer && selected.answer.sources || [];
+    for (i = 0; i < sources.length; i++) if (/^https:\/\//i.test(sources[i].url)) { var link = el('a', 'source-link', sources[i].title); link.href = sources[i].url; link.target = '_blank'; link.rel = 'noopener noreferrer'; detail.appendChild(link); }
+    var actions = el('div', 'question-actions');
+    if (selected.answer && !selected.answer.failed) { var hear = el('button', 'quiet-button', 'Ouvir resposta'); hear.type = 'button'; hear.onclick = function () { if (busy || micProcessing) return; presentResponse(selected.answer.content, selected.answer); window.AguirraVoice.speak(lastReply, lastReplyId); }; actions.appendChild(hear); }
+    var refresh = el('button', 'quiet-button', 'Consultar de novo'); refresh.type = 'button'; refresh.onclick = function () { send(selected.question.content, true); }; actions.appendChild(refresh);
+    var close = el('button', 'quiet-button', 'Fechar'); close.type = 'button'; close.onclick = function () { selectedQuestion = null; renderBrain(); }; actions.appendChild(close); detail.appendChild(actions);
+    detail.appendChild(el('p', 'question-cache-note', A.find(selected.question.content, [selected.question].concat(selected.answer ? [selected.answer] : []), state.memories, state.settings.memory_enabled) ? 'Resposta disponível para reutilização. Você pode consultar de novo para atualizá-la.' : 'Ponto preservado no mapa. Esta resposta precisa de uma nova consulta para ser reutilizada.'));
+  }
+  function renderBrain() {
+    renderQuestionMap();
+    var cats = ['profile', 'preferences', 'goals', 'projects', 'notes'], i;
     var filters = $('memory-filters'); wipe(filters); var allCats = ['all'].concat(cats);
     for (i = 0; i < allCats.length; i++) (function (cat) { var b = el('button', 'filter-button' + (memoryFilter === cat ? ' selected' : ''), cat === 'all' ? 'Todas as conexões' : M.categories[cat]); b.onclick = function () { memoryFilter = cat; renderBrain(); }; filters.appendChild(b); }(allCats[i]));
     var list = $('memory-list'); wipe(list); var items = state.memories.filter(function (m) { return memoryFilter === 'all' || m.category === memoryFilter; });
@@ -155,6 +186,7 @@
     for (i = 0; i < sorted.length; i++) topics.appendChild(el('span', 'topic-chip', sorted[i].name + ' · ' + sorted[i].count));
   }
   function renderSettings() {
+    if (window.AguirraVoice.setScope) window.AguirraVoice.setScope(user ? 'user:' + user.id : 'guest');
     $('setting-low-power').checked = !!preferences.low_power; $('setting-voice').checked = !!preferences.voice; $('setting-memory').checked = state.settings.memory_enabled !== false;
     $('settings-storage').textContent = user ? (localApi ? 'O núcleo e o histórico ficam no seu computador. O tablet e o PC acessam a mesma memória pela rede local, sem banco pago.' : 'Sua memória está sincronizada na sua conta. O mapa e o histórico aparecem nos aparelhos em que você entrar.') : 'Você pode perguntar sem conta. O histórico e o núcleo ficam neste navegador. A conta é opcional para sincronizar memórias entre aparelhos.';
     $('settings-login').textContent = user ? 'Gerenciar meu acesso ↗' : (localApi ? 'Conectar ao meu computador ↗' : 'Entrar ou criar conta ↗');
@@ -172,7 +204,7 @@
   function excludeLocalMemory(m) { if (!m.source_message_id) return; for (var i = 0; i < state.messages.length; i++) if (state.messages[i].id === m.source_message_id) state.messages[i].exclude_context = true; }
   function deleteMemory(m) {
     if (!window.confirm('Esquecer esta memória? Ela deixará de entrar nas próximas respostas. O texto original continua no histórico até você apagá-lo.')) return;
-    if (!user) { excludeLocalMemory(m); state.memories = state.memories.filter(function (x) { return x.id !== m.id; }); saveLocal(); render(); return; }
+    if (!user) { window.AguirraVoice.clearCache(); excludeLocalMemory(m); state.memories = state.memories.filter(function (x) { return x.id !== m.id; }); saveLocal(); render(); return; }
     request('DELETE', '/api/memory?id=' + encodeURIComponent(m.id), null, function (err) { if (err) toast(err.message); else loadData(); });
   }
   var lastReply = '', lastReplyId = null, voiceActive = false, voiceLoading = false, listening = false, orbPulse = 0;
@@ -221,24 +253,25 @@
     var prompts = document.querySelectorAll('[data-prompt]'); for (i = 0; i < prompts.length; i++) prompts[i].onclick = function () { send(this.getAttribute('data-prompt')); };
     $('home-form').onsubmit = function (event) { event.preventDefault(); send($('home-input').value); };
     $('stop-response').onclick = function () { window.AguirraVoice.stop(); };
+    $('question-search').oninput = function () { questionPage = 0; selectedQuestion = null; renderBrain(); };
     $('history-search').oninput = renderHistory; $('add-memory').onclick = function () { openMemory(); };
     $('account-button').onclick = openAuth; $('settings-login').onclick = openAuth; $('close-auth').onclick = function () { closeModal('auth-modal'); }; $('close-memory').onclick = function () { closeModal('memory-modal'); };
     $('google-login').onclick = function () { if (!googleLoginReady) return; this.disabled = true; $('google-login-status').textContent = 'Conectando ao Google…'; request('POST', '/api/google', {}, function (err, result) { if (err) { $('google-login').disabled = false; $('google-login-status').textContent = err.message; return; } window.location.href = result.url; }); };
     $('toggle-auth').onclick = function () { authMode = authMode === 'login' ? 'register' : 'login'; $('auth-title').textContent = authMode === 'login' ? 'Entre no seu espaço.' : 'Crie seu espaço pessoal.'; $('auth-submit').textContent = authMode === 'login' ? 'Entrar' : 'Criar conta'; $('toggle-auth').textContent = authMode === 'login' ? 'Ainda não tenho conta ↗' : 'Já tenho uma conta ↗'; $('auth-feedback').textContent = ''; };
-    $('auth-form').onsubmit = function (event) { event.preventDefault(); $('auth-submit').disabled = true; $('auth-feedback').textContent = 'Conectando…'; request('POST', '/api/auth', { mode: authMode, email: $('auth-email').value, password: $('auth-password').value }, function (err, data) { $('auth-submit').disabled = false; $('auth-password').value = ''; if (err) { $('auth-feedback').textContent = err.message; return; } if (!data.user) { $('auth-feedback').textContent = data.message || 'Confira seu e-mail para confirmar a conta e depois entre aqui.'; return; } user = data.user; window.AguirraVoice.stop(); window.AguirraVoice.clearCache(); hideCaption(); closeModal('auth-modal'); loadData(); setStatus('Conta conectada'); toast('Seu espaço está conectado.'); }); };
-    $('logout-button').onclick = function () { request('POST', '/api/logout', {}, function (err) { if (err) { toast(err.message); return; } user = null; window.AguirraVoice.stop(); window.AguirraVoice.clearCache(); hideCaption(); state = readJSON(storageKey, empty()); closeModal('auth-modal'); render(); setStatus('Neste aparelho'); }); };
+    $('auth-form').onsubmit = function (event) { event.preventDefault(); $('auth-submit').disabled = true; $('auth-feedback').textContent = 'Conectando…'; request('POST', '/api/auth', { mode: authMode, email: $('auth-email').value, password: $('auth-password').value }, function (err, data) { $('auth-submit').disabled = false; $('auth-password').value = ''; if (err) { $('auth-feedback').textContent = err.message; return; } if (!data.user) { $('auth-feedback').textContent = data.message || 'Confira seu e-mail para confirmar a conta e depois entre aqui.'; return; } user = data.user; lastDataSync = 0; state = empty(); window.AguirraVoice.stop(); window.AguirraVoice.clearCache(); hideCaption(); closeModal('auth-modal'); loadData(); setStatus('Conta conectada'); toast('Seu espaço está conectado.'); }); };
+    $('logout-button').onclick = function () { request('POST', '/api/logout', {}, function (err) { if (err) { toast(err.message); return; } user = null; lastDataSync = 0; window.AguirraVoice.stop(); window.AguirraVoice.clearCache(); hideCaption(); state = readJSON(storageKey, empty()); closeModal('auth-modal'); render(); setStatus('Neste aparelho'); }); };
     $('memory-form').onsubmit = function (event) { event.preventDefault(); var content = $('memory-content').value.trim(); if (!content) return; if (M.sensitive(content)) { $('memory-feedback').textContent = 'Guarde preferências e objetivos. Credenciais e informações sensíveis não entram no núcleo.'; return; } var m = { category: $('memory-category').value, content: content, key: M.normalize(content).slice(0, 100), origin: 'manual' }; if (!user) { if (editingMemory) { var old = state.memories.filter(function (x) { return x.id === editingMemory; })[0]; if (old) m.key = old.key; } putLocalMemory(m); saveLocal(); render(); closeModal('memory-modal'); toast('Conexão guardada no seu núcleo.'); return; } request('POST', '/api/memory', { id: editingMemory, category: m.category, content: m.content }, function (err) { if (err) { $('memory-feedback').textContent = err.message; return; } closeModal('memory-modal'); loadData(); toast('Memória sincronizada.'); }); };
     $('setting-low-power').onchange = function () { preferences.low_power = this.checked; savePreferences(); renderSettings(); startOrb(); }; $('power-shortcut').onclick = function () { preferences.low_power = !preferences.low_power; savePreferences(); renderSettings(); startOrb(); toast(preferences.low_power ? 'Modo econômico ativado.' : 'Animação ativada.'); };
     $('setting-voice').onchange = function () { preferences.voice = this.checked; savePreferences(); if (!this.checked) window.AguirraVoice.stop(); };
     $('setting-voice-name').onchange = function () { preferences.voice_name = this.value; window.AguirraVoice.setVoice(this.value); savePreferences(); };
     $('test-voice').onclick = function () { window.AguirraVoice.speak('Olá. Eu sou o Aguirra, seu assistente pessoal. Estou pronto para conversar com você.', null, true); };
-    $('setting-memory').onchange = function () { var enabled = this.checked; if (!user) { state.settings.memory_enabled = enabled; saveLocal(); return; } request('POST', '/api/settings', { memory_enabled: enabled }, function (err) { if (err) { $('setting-memory').checked = state.settings.memory_enabled !== false; toast(err.message); } else state.settings.memory_enabled = enabled; }); };
+    $('setting-memory').onchange = function () { var enabled = this.checked; window.AguirraVoice.clearCache(); if (!user) { state.settings.memory_enabled = enabled; saveLocal(); return; } request('POST', '/api/settings', { memory_enabled: enabled }, function (err) { if (err) { $('setting-memory').checked = state.settings.memory_enabled !== false; toast(err.message); } else state.settings.memory_enabled = enabled; }); };
     $('stop-voice').onclick = function () { window.AguirraVoice.stop(); };
     $('sync-local').onclick = function () { var local = readJSON(storageKey, empty()); if (!local.memories.length) return; request('POST', '/api/import', { memories: local.memories.map(function (m) { return { category: m.category, content: m.content }; }) }, function (err) { if (err) toast(err.message); else { loadData(); toast('Memórias importadas. O histórico local permanece neste aparelho.'); } }); };
     $('export-data').onclick = function () { var data = JSON.stringify({ format: 'aguirra-export-v1', exported_at: new Date().toISOString(), data: state }, null, 2), url; try { var blob = new Blob([data], { type: 'application/json' }); url = (window.URL || window.webkitURL).createObjectURL(blob); var a = el('a', '', 'Baixar dados'); a.href = url; a.download = 'aguirra-meus-dados.json'; document.body.appendChild(a); a.click(); document.body.removeChild(a); setTimeout(function () { (window.URL || window.webkitURL).revokeObjectURL(url); }, 20000); } catch (e) { var exportWindow = window.open('', '_blank'); if (exportWindow) { exportWindow.document.body.appendChild(exportWindow.document.createElement('pre')).textContent = data; } else toast('Seu navegador bloqueou a exportação. Tente pelo computador.'); } };
-    $('clear-data').onclick = function () { if (busy) { toast('Aguarde a resposta antes de apagar os dados.'); return; } if (!window.confirm('Apagar todo o histórico, assuntos e memórias' + (user ? ' da sua conta em todos os aparelhos' : ' deste aparelho') + '? Essa ação não pode ser desfeita.')) return; if (!user) { state = empty(); saveLocal(); render(); toast('Seu núcleo foi limpo.'); return; } request('DELETE', '/api/data', null, function (err) { if (err) toast(err.message); else { loadData(); toast('Histórico e núcleo apagados da sua conta.'); } }); };
+    $('clear-data').onclick = function () { if (busy) { toast('Aguarde a resposta antes de apagar os dados.'); return; } if (!window.confirm('Apagar todo o histórico, assuntos e memórias' + (user ? ' da sua conta em todos os aparelhos' : ' deste aparelho') + '? Essa ação não pode ser desfeita.')) return; window.AguirraVoice.clearCache(); if (!user) { state = empty(); saveLocal(); render(); toast('Seu núcleo foi limpo.'); return; } request('DELETE', '/api/data', null, function (err) { if (err) toast(err.message); else { loadData(); toast('Histórico e núcleo apagados da sua conta.'); } }); };
     $('fullscreen-button').onclick = function () { var root = document.documentElement, enter = root.requestFullscreen || root.webkitRequestFullscreen || root.mozRequestFullScreen; var exit = document.exitFullscreen || document.webkitExitFullscreen || document.mozCancelFullScreen; if (document.fullscreenElement || document.webkitFullscreenElement) { if (exit) exit.call(document); } else if (enter) { var p = enter.call(root); if (p && p.catch) p.catch(function () { toast('O navegador não permitiu a tela cheia.'); }); } else toast('Este navegador não oferece tela cheia.'); };
-    document.addEventListener('visibilitychange', function () { if (document.hidden) window.AguirraMicrophone.cancel(); startOrb(); });
+    document.addEventListener('visibilitychange', function () { if (document.hidden) window.AguirraMicrophone.cancel(); else if (user && !busy && Date.now() - lastDataSync > 60000) loadData(); startOrb(); });
     document.addEventListener('keydown', function (event) { if (event.keyCode === 27) { closeModal('auth-modal'); closeModal('memory-modal'); } var modal = !$('auth-modal').hidden ? $('auth-modal') : (!$('memory-modal').hidden ? $('memory-modal') : null); if (event.keyCode !== 9 || !modal) return; var all = modal.querySelectorAll('button,input,textarea,select'), nodes = [], k; for (k = 0; k < all.length; k++) if (!all[k].hidden && all[k].offsetWidth > 0) nodes.push(all[k]); if (!nodes.length) return; if (event.shiftKey && document.activeElement === nodes[0]) { event.preventDefault(); nodes[nodes.length - 1].focus(); } else if (!event.shiftKey && document.activeElement === nodes[nodes.length - 1]) { event.preventDefault(); nodes[0].focus(); } });
   }
   function setStatus(text) { wipe($('connection-status')); $('connection-status').appendChild(el('i')); $('connection-status').appendChild(document.createTextNode(text)); }

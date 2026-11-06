@@ -8,6 +8,8 @@ set local request.jwt.claims = '{"sub":"aaaaaaaa-0000-4000-8000-000000000001","r
 insert into public.aguirra_threads(id,user_id,title) values('bbbbbbbb-0000-4000-8000-000000000001',auth.uid(),'RLS fixture');
 insert into public.aguirra_messages(id,user_id,thread_id,role,content) values('cccccccc-0000-4000-8000-000000000001',auth.uid(),'bbbbbbbb-0000-4000-8000-000000000001','user','Prefiro exemplos curtos');
 insert into public.aguirra_memories(user_id,category,key,content,source_message_id) values(auth.uid(),'preferences','short','Prefere exemplos curtos','cccccccc-0000-4000-8000-000000000001');
+update public.aguirra_messages set cache_meta='{"version":1,"key":"definition:ram"}'::jsonb;
+do $$ begin if not exists(select 1 from public.aguirra_messages where cache_meta->>'key'='definition:ram') then raise exception 'owner cache metadata inaccessible'; end if; end $$;
 select public.aguirra_touch_topic('Desenvolvimento');
 do $$ declare i integer; allowed boolean; begin
   for i in 1..30 loop allowed:=public.aguirra_claim_request(); if not allowed then raise exception 'quota rejected too early'; end if; end loop;
@@ -38,4 +40,4 @@ select public.aguirra_forget_all();
 do $$ begin if exists(select 1 from public.aguirra_memories) or exists(select 1 from public.aguirra_messages) or exists(select 1 from public.aguirra_threads) then raise exception 'forget-all did not clear data'; end if; end $$;
 reset role;
 rollback;
-select 'PASS: owner isolation, cross-user writes, thread ownership, quota, forget-all; fixtures rolled back' as result;
+select 'PASS: answer cache metadata, owner isolation, cross-user writes, thread ownership, quota, forget-all; fixtures rolled back' as result;

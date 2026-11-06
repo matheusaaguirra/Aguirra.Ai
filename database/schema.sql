@@ -21,6 +21,7 @@ create table public.aguirra_messages (
   reply_id uuid,
   failed boolean not null default false,
   exclude_context boolean not null default false,
+  cache_meta jsonb,
   created_at timestamptz not null default now(),
   foreign key(thread_id,user_id) references public.aguirra_threads(id,user_id) on delete cascade,
   unique(id,user_id)

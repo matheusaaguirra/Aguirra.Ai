@@ -12,7 +12,7 @@ export const guestInput = z.object({
   message: z.string().trim().min(1).max(4000), request_id: z.string().uuid(),
   history: z.array(z.object({ role: z.enum(['user', 'assistant']), text: z.string().max(1200) })).max(6).default([]),
   memories: z.array(z.object({ category: z.enum(['profile', 'preferences', 'goals', 'projects', 'notes']), content: z.string().min(3).max(500) })).max(50).default([]),
-  memory_enabled: z.boolean().default(true),
+  memory_enabled: z.boolean().default(true), force_refresh: z.boolean().default(false),
 });
 export function guestContext(input: z.infer<typeof guestInput>): ConversationContext {
   const memories = input.memory_enabled ? input.memories.filter(m => !sensitive(m.content)) : [];

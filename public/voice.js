@@ -46,14 +46,19 @@
       var promise = currentAudio.play(); if (promise && promise.catch) promise.catch(function () { if (run === generation) unavailable('Toque em Ouvir novamente para liberar o áudio ElevenLabs.', true); });
     } catch (e) { if (run === generation) unavailable('Este navegador não conseguiu reproduzir o áudio ElevenLabs. Selecione a voz do aparelho em Configurações.'); }
   }
+  var ownerScope = null;
   function speakEleven(text, run) {
     var parts = speechParts(text), index = 0;
     function next() { if (run !== generation) return; if (index >= parts.length) { ready(); return; } var part = parts[index++];
       for (var i = 0; i < cache.length; i++) if (cache[i].text === part) { playEleven(cache[i].data, part, run, next); return; }
-      onState('loading'); status('Preparando voz ElevenLabs…');
+      onState('loading');
+      if (root.AguirraAudioCache) root.AguirraAudioCache.read(part, function (saved) { if (run !== generation) return; if (saved) { playEleven(saved, part, run, next); return; } generate(); }); else generate();
+      function generate() {
+      status('Preparando voz ElevenLabs…');
       var xhr = new root.XMLHttpRequest(); currentRequest = xhr; xhr.open('POST', '/api/speech', true); xhr.setRequestHeader('Content-Type', 'application/json'); xhr.timeout = 65000;
-      xhr.onload = function () { if (run !== generation) return; currentRequest = null; var data; try { data = JSON.parse(xhr.responseText); } catch (e) { data = {}; } if (xhr.status !== 200 || !data.audio_base64) { unavailable(data.error || 'A voz ElevenLabs não está disponível agora. O texto continua aqui.'); return; } cache.push({text:part, data:data}); if (cache.length > 2) cache.shift(); playEleven(data, part, run, next); };
+      xhr.onload = function () { if (run !== generation) return; currentRequest = null; var data; try { data = JSON.parse(xhr.responseText); } catch (e) { data = {}; } if (xhr.status !== 200 || !data.audio_base64) { unavailable(data.error || 'A voz ElevenLabs não está disponível agora. O texto continua aqui.'); return; } if (root.AguirraAudioCache) root.AguirraAudioCache.write(part, data); cache.push({text:part, data:data}); if (cache.length > 2) cache.shift(); playEleven(data, part, run, next); };
       xhr.onerror = xhr.ontimeout = function () { if (run === generation) unavailable('Não consegui carregar a voz ElevenLabs. Tente novamente.'); }; xhr.send(JSON.stringify({text:part}));
+      }
     }
     next();
   }
@@ -83,7 +88,7 @@
     }
     begin(false);
   }
-  root.AguirraVoice = { speak: speak, stop: stop, voices: voices, cleanText: cleanText, prime: prime, clearCache: function () { cache = []; }, spectrum: function () { if (!audioAnalyser) return null; var data = new Uint8Array(audioAnalyser.frequencyBinCount); audioAnalyser.getByteFrequencyData(data); return data; }, setEleven: function (ready) { elevenAvailable = !!ready; },
+  root.AguirraVoice = { speak: speak, stop: stop, voices: voices, cleanText: cleanText, prime: prime, clearCache: function () { cache = []; if (root.AguirraAudioCache) root.AguirraAudioCache.clear(); }, setScope: function (scope) { if (ownerScope !== scope) { stop(); cache = []; ownerScope = scope; } if (root.AguirraAudioCache) root.AguirraAudioCache.setScope(scope); }, spectrum: function () { if (!audioAnalyser) return null; var data = new Uint8Array(audioAnalyser.frequencyBinCount); audioAnalyser.getByteFrequencyData(data); return data; }, setEleven: function (ready) { elevenAvailable = !!ready; },
     configure: function (options) { selected = options.voice || ''; serverAvailable = !!options.server; status = options.onStatus || status; notice = options.onNotice || notice; onState = options.onState || onState; onCaption = options.onCaption || onCaption; onPulse = options.onPulse || onPulse; },
     setVoice: function (name) { selected = name || ''; }, setServer: function (enabled) { serverAvailable = !!enabled; }
   };
