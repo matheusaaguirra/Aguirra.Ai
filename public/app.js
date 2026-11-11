@@ -222,8 +222,8 @@
     if (window.AguirraVoice) window.AguirraVoice.setServer(voiceServer); window.AguirraVoice.setEleven(elevenReady);
     populateVoices();
   }
-  function openModal(id) { modalFocus = document.activeElement; $(id).hidden = false; var input = $(id).querySelector('input,textarea'); if (input) input.focus(); }
-  function closeModal(id) { $(id).hidden = true; if (modalFocus && modalFocus.focus) modalFocus.focus(); }
+  function openModal(id) { modalFocus = document.activeElement; $(id).hidden = false; var input = $(id).querySelector('input,textarea'); if (input) input.focus(); updateOrbState(); }
+  function closeModal(id) { $(id).hidden = true; if (modalFocus && modalFocus.focus) modalFocus.focus(); updateOrbState(); }
   function openAuth() { if (busy) { toast('Aguarde a resposta antes de mudar o acesso.'); return; } $('auth-feedback').textContent = ''; $('google-auth').hidden = !!user || localApi; $('google-login').disabled = !googleLoginReady; $('google-login-status').textContent = googleLoginReady ? 'Use sua conta Google para sincronizar seu núcleo.' : 'A entrada com Google aguarda ativação. Você pode continuar sem conta.'; $('auth-title').textContent = user ? 'Seu acesso está conectado.' : (localApi ? 'Conecte ao seu computador.' : 'Entre no seu espaço.'); $('auth-form').hidden = !!user; $('toggle-auth').hidden = !!user || localApi; $('logout-button').hidden = !user; $('auth-email').hidden = localApi; $('auth-email').required = !localApi; document.querySelector('label[for="auth-email"]').hidden = localApi; document.querySelector('label[for="auth-password"]').textContent = localApi ? 'Código de acesso exibido no computador' : 'Senha'; if (localApi) { $('auth-email').value = 'local@aguirra.invalid'; authMode = 'login'; $('auth-submit').textContent = 'Conectar'; document.querySelector('#auth-modal .modal > p').textContent = 'Digite o código que aparece ao iniciar o Aguirra no computador. Nenhuma conta ou API paga é necessária.'; } openModal('auth-modal'); }
   function openMemory(m) { editingMemory = m ? m.id : null; $('memory-category').value = m ? m.category : 'preferences'; $('memory-content').value = m ? m.content : ''; $('memory-feedback').textContent = ''; $('memory-title').textContent = m ? 'Ajustar uma conexão.' : 'O que devo guardar?'; openModal('memory-modal'); }
   function excludeLocalMemory(m) { if (!m.source_message_id) return; for (var i = 0; i < state.messages.length; i++) if (state.messages[i].id === m.source_message_id) state.messages[i].exclude_context = true; }
@@ -234,6 +234,7 @@
   }
   var lastReply = '', lastReplyId = null, voiceActive = false, voiceLoading = false, listening = false, orbPulse = 0;
   function updateOrbState() {
+    window.AguirraWake.pause(!sessionReady || busy || voiceActive || voiceLoading || listening || micProcessing || document.hidden || !$('auth-modal').hidden || !$('memory-modal').hidden);
     var mode = listening ? 'listening' : (voiceActive ? 'speaking' : (busy || micProcessing || voiceLoading ? 'thinking' : 'idle'));
     $('orb-stage').className = 'orb-stage is-' + mode;
     $('assistant-status').textContent = { listening: 'Ouvindo', thinking: 'Preparando resposta', speaking: 'Falando', idle: 'Em espera' }[mode];
@@ -256,7 +257,7 @@
       onText: function (text) { $('home-input').value = text; }, onNotice: function (text) { $('microphone-status').textContent = text; $('microphone-status').hidden = false; },
       onResult: function (text) { $('home-input').value = text; send(text); }, transcribe: function (audio, callback) { request('POST', '/api/transcribe', { audio: audio }, callback); }
     });
-    document.querySelector('[data-mic]').onclick = function () { if (busy || micProcessing) return; if (!sessionReady) { $('microphone-status').hidden = false; $('microphone-status').textContent = 'Conectando ao Aguirra. Tente novamente em um instante.'; return; } window.AguirraVoice.stop(); window.AguirraMicrophone.toggle(); };
+    document.querySelector('[data-mic]').onclick = function () { if (busy || micProcessing) return; if (!sessionReady) { $('microphone-status').hidden = false; $('microphone-status').textContent = 'Conectando ao Aguirra. Tente novamente em um instante.'; return; } window.AguirraWake.pause(true); window.AguirraVoice.stop(); window.AguirraWake.pause(true); window.AguirraMicrophone.toggle(); };
     $('cancel-microphone').onclick = function () { window.AguirraMicrophone.cancel(); };
   }
   var orbTimer = null, orbPhase = 0, bandLevels = [];
@@ -361,7 +362,7 @@
     $('export-data').onclick = function () { var data = JSON.stringify({ format: 'aguirra-export-v1', exported_at: new Date().toISOString(), data: state }, null, 2), url; try { var blob = new Blob([data], { type: 'application/json' }); url = (window.URL || window.webkitURL).createObjectURL(blob); var a = el('a', '', 'Baixar dados'); a.href = url; a.download = 'aguirra-meus-dados.json'; document.body.appendChild(a); a.click(); document.body.removeChild(a); setTimeout(function () { (window.URL || window.webkitURL).revokeObjectURL(url); }, 20000); } catch (e) { var exportWindow = window.open('', '_blank'); if (exportWindow) { exportWindow.document.body.appendChild(exportWindow.document.createElement('pre')).textContent = data; } else toast('Seu navegador bloqueou a exportação. Tente pelo computador.'); } };
     $('clear-data').onclick = function () { if (busy) { toast('Aguarde a resposta antes de apagar os dados.'); return; } if (!window.confirm('Apagar todo o histórico, assuntos e memórias' + ' do seu núcleo no Supabase' + '? Essa ação não pode ser desfeita.')) return; window.AguirraVoice.clearCache(); request('DELETE', '/api/data', null, function (err) { if (err) toast(err.message); else { loadData(); toast('Histórico e núcleo apagados da sua conta.'); } }); };
     $('fullscreen-button').onclick = function () { var root = document.documentElement, enter = root.requestFullscreen || root.webkitRequestFullscreen || root.mozRequestFullScreen; var exit = document.exitFullscreen || document.webkitExitFullscreen || document.mozCancelFullScreen; if (document.fullscreenElement || document.webkitFullscreenElement) { if (exit) exit.call(document); } else if (enter) { var p = enter.call(root); if (p && p.catch) p.catch(function () { toast('O navegador não permitiu a tela cheia.'); }); } else toast('Este navegador não oferece tela cheia.'); };
-    document.addEventListener('visibilitychange', function () { if (document.hidden) window.AguirraMicrophone.cancel(); else if (sessionReady && !busy && Date.now() - lastDataSync > 60000) loadData(); startOrb(); });
+    document.addEventListener('visibilitychange', function () { if (document.hidden) window.AguirraMicrophone.cancel(); else if (sessionReady && !busy && Date.now() - lastDataSync > 60000) loadData(); updateOrbState(); });
     document.addEventListener('keydown', function (event) { if (event.keyCode === 27) { closeModal('auth-modal'); closeModal('memory-modal'); } var modal = !$('auth-modal').hidden ? $('auth-modal') : (!$('memory-modal').hidden ? $('memory-modal') : null); if (event.keyCode !== 9 || !modal) return; var all = modal.querySelectorAll('button,input,textarea,select'), nodes = [], k; for (k = 0; k < all.length; k++) if (!all[k].hidden && all[k].offsetWidth > 0) nodes.push(all[k]); if (!nodes.length) return; if (event.shiftKey && document.activeElement === nodes[0]) { event.preventDefault(); nodes[nodes.length - 1].focus(); } else if (!event.shiftKey && document.activeElement === nodes[nodes.length - 1]) { event.preventDefault(); nodes[0].focus(); } });
   }
   function setStatus(text) { wipe($('connection-status')); $('connection-status').appendChild(el('i')); $('connection-status').appendChild(document.createTextNode(text)); }
@@ -380,9 +381,22 @@
       mapResize = setTimeout(function () { if (activeView === 'brain') renderQuestionMap(); }, 130);
     }
   });
+  window.AguirraWake.configure({
+    onCommand: function (text) { send(text); },
+    onStatus: function (text, enabled) {
+      $('wake-button').textContent = enabled ? 'Desativar escuta' : 'Ativar por voz';
+      $('wake-button').setAttribute('aria-pressed', String(enabled));
+      $('wake-status').textContent = text;
+      $('wake-status').hidden = text === 'Ativar por voz';
+    }
+  });
+  $('wake-button').onclick = function () {
+    if (!sessionReady || busy || voiceActive || voiceLoading || listening || micProcessing) { toast('Aguarde o assistente ficar disponível.'); return; }
+    window.AguirraVoice.prime(); window.AguirraWake.toggle();
+  };
   bind(); setupVoice(); tick(); setInterval(tick, 15000); render(); startOrb();
   if (window.speechSynthesis) window.speechSynthesis.onvoiceschanged = populateVoices;
   if (/[?&]auth=google-failed(?:&|$)/.test(window.location.search)) { toast('Não foi possível concluir a entrada com Google. Tente novamente.'); if (window.history && window.history.replaceState) window.history.replaceState(null, '', '/'); }
   $('voice-status').textContent = 'Escolha ElevenLabs para a voz natural ou uma voz do aparelho como alternativa.';
-  request('GET', '/api/session', null, function (err, data) { if (err) { setStatus('Sem conexão'); $('server-capabilities').textContent = 'Reconecte para acessar seu núcleo no Supabase.'; return; } visitorAvailable = !!data.visitor_available; user = data.user || null; localApi = !!data.local; voiceServer = !!data.tts_server; elevenReady = !!data.elevenlabs_ready; window.AguirraMicrophone.setServer(!!data.transcription_ready); $('elevenlabs-status').textContent = elevenReady ? 'ElevenLabs disponível. A geração só é liberada no plano Free, sem excedentes.' : 'ElevenLabs aguarda a chave no servidor. Até lá, a voz do aparelho é usada como alternativa.'; googleLoginReady = !!data.google_login; setStatus(user ? (localApi ? 'Computador conectado' : 'Conta conectada') : 'Núcleo na nuvem'); $('server-capabilities').textContent = 'Perguntas sem conta. ' + (data.google_ready ? 'Conversa com Gemini gratuito. Fontes públicas por Wikipedia e notícias RSS. A pesquisa integrada do Google está desativada.' : (localApi ? 'IA local com Ollama. ' : 'Conversa gratuita ainda indisponível. ') + 'Manchetes disponíveis por RSS; isso não é uma pesquisa completa na web.'); loadData(function(error){sessionReady=!error; if(!error && !user && (readJSON(storageKey,empty()).messages.length || readJSON(storageKey,empty()).memories.length)) importPrevious();}); });
+  request('GET', '/api/session', null, function (err, data) { if (err) { setStatus('Sem conexão'); $('server-capabilities').textContent = 'Reconecte para acessar seu núcleo no Supabase.'; return; } visitorAvailable = !!data.visitor_available; user = data.user || null; localApi = !!data.local; voiceServer = !!data.tts_server; elevenReady = !!data.elevenlabs_ready; window.AguirraMicrophone.setServer(!!data.transcription_ready); $('elevenlabs-status').textContent = elevenReady ? 'ElevenLabs disponível. A geração só é liberada no plano Free, sem excedentes.' : 'ElevenLabs aguarda a chave no servidor. Até lá, a voz do aparelho é usada como alternativa.'; googleLoginReady = !!data.google_login; setStatus(user ? (localApi ? 'Computador conectado' : 'Conta conectada') : 'Núcleo na nuvem'); $('server-capabilities').textContent = 'Perguntas sem conta. ' + (data.google_ready ? 'Conversa com Gemini gratuito. Fontes públicas por Wikipedia e notícias RSS. A pesquisa integrada do Google está desativada.' : (localApi ? 'IA local com Ollama. ' : 'Conversa gratuita ainda indisponível. ') + 'Manchetes disponíveis por RSS; isso não é uma pesquisa completa na web.'); loadData(function(error){sessionReady=!error; updateOrbState(); if(!error && !user && (readJSON(storageKey,empty()).messages.length || readJSON(storageKey,empty()).memories.length)) importPrevious();}); });
 }());

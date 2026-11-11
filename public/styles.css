@@ -308,3 +308,10 @@ input::placeholder { color: #b4b7d0; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; }
 }
+
+.wake-button { display: inline-flex; align-items: center; border: 1px solid #787f9c; color: #c4b8ff; background: #22263b; border-radius: 20px; min-height: 40px; padding: 6px 16px; margin-bottom: 12px; font-size: 13px; }
+.wake-button::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: #787f9c; margin-right: 8px; }
+.wake-button[aria-pressed="true"]::before { background: #83d8c6; }
+.wake-status { color: #b4b7d0; font-size: 12px; margin: -4px 0 10px; }
+.brand-mark { width: 32px; height: 32px; }
+.compact-brand { width: 24px; height: 24px; }

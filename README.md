@@ -27,7 +27,8 @@ Assistente pessoal web com conversas, pesquisa e um núcleo de memória que voc�
 - IA local no computador com Ollama; nenhum endpoint de modelo pago.
 - Perguntas sem conta, núcleo privado no Supabase e ferramenta de data/hora.
 - Pesquisa opcional com Google e fontes verificáveis; manchetes RSS enquanto a chave não é configurada.
-- Interface em índigo e lavanda. O símbolo do Aguirra une uma onda de voz a dois pontos de memória.
+- Ativação por “Aguirra” na Central. O usuário inicia a escuta e concede permissão. Depende de SpeechRecognition e da página visível, pausa durante respostas e dispensa transcrição paga contínua. O serviço de voz do navegador pode processar áudio online.
+- Interface em índigo e lavanda. O símbolo geométrico do Aguirra representa conexões ao redor de um núcleo.
 - Voz sintética automática em português, seletor de voz e botão Ouvir resposta. O Windows local pode gerar áudio WAV para navegadores antigos, sem API paga.
 - Modo econômico e tela cheia quando suportados pelo navegador.
 

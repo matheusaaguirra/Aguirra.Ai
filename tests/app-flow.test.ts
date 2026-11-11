@@ -28,6 +28,7 @@ function app(signedIn = true) {
     navigator: { userAgent: 'Android 4.4' }, localStorage: { getItem() { return null; }, setItem() {} },
     document: { body: node(), getElementById: element, querySelector: element, querySelectorAll(selector: string) { return selector === '[data-view],[data-open]' ? [brainNav] : []; }, createElement: node, createElementNS: node, createTextNode: (text: string) => ({ textContent: text }), addEventListener() {} },
     location: { search: '' }, scrollTo() {}, matchMedia() { return { matches: true }; }, setTimeout() { return 1; }, clearTimeout() {}, setInterval() {}, XMLHttpRequest: XHR,
+    AguirraWake: { pause() {}, configure() {}, toggle() {} },
     AguirraMicrophone: { configure() {}, cancel() {}, setServer() {} },
     AguirraVoice: { configure(value: any) { callbacks = value; }, cleanText: (text: string) => text, prime() {}, clearCache() {}, stop() { callbacks?.onState('idle'); }, setServer() {}, setEleven() {}, setVoice() {}, voices() { return []; }, spectrum() { return null; }, speak(text: string, id: string | null) { spoken.push({ text, id }); callbacks.onState('speaking'); callbacks.onCaption(text); } },
   };

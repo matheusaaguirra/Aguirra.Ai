@@ -44,3 +44,71 @@
     configure: function (options) { onState = options.onState || onState; onText = options.onText || onText; onNotice = options.onNotice || onNotice; onResult = options.onResult || onResult; transcribe = options.transcribe || transcribe; }
   };
 }(this));
+
+(function (root) {
+  'use strict';
+  var enabled = false, paused = false, rec = null, retry = null, deadline = null, run = 0, armed = false, failures = 0;
+  var report = function () {}, deliver = function () {};
+  function status(text) { report(text, enabled, armed); }
+  function clearDeadline() { if (deadline) root.clearTimeout(deadline); deadline = null; }
+  function disarm() { armed = false; clearDeadline(); }
+  function stop() {
+    run++;
+    if (retry) root.clearTimeout(retry);
+    retry = null; disarm();
+    var old = rec; rec = null;
+    if (old) { try { old.abort(); } catch (e) {} }
+  }
+  function disable(text) { enabled = false; stop(); status(text || 'Ativar por voz'); }
+  function listen() {
+    if (!enabled || paused || rec) return;
+    var Recognition = root.SpeechRecognition || root.webkitSpeechRecognition, token = ++run;
+    if (!Recognition || root.isSecureContext === false) { disable('Ativação por voz indisponível neste navegador. Use o microfone.'); return; }
+    try {
+      var instance = rec = new Recognition(), submitted = false;
+      instance.lang = 'pt-BR'; instance.continuous = true; instance.interimResults = false;
+      instance.onstart = function () { if (token === run) status(armed ? 'Estou ouvindo seu pedido…' : 'Diga “Aguirra”'); };
+      instance.onresult = function (event) {
+        if (token !== run || submitted) return;
+        failures = 0;
+        for (var i = event.resultIndex || 0; i < event.results.length; i++) {
+          if (!event.results[i].isFinal) continue;
+          var text = event.results[i][0].transcript.trim();
+          var wake = /\b(?:aguirra|aguira|agirra)\b[\s,:.!?—-]*/i.exec(text);
+          if (wake) {
+            armed = true; clearDeadline();
+            text = text.slice(wake.index + wake[0].length).trim();
+            deadline = root.setTimeout(function () { disarm(); status('Diga “Aguirra”'); }, 12000);
+          } else if (!armed) continue;
+          if (!text) { status('Estou ouvindo seu pedido…'); continue; }
+          submitted = true; paused = true; stop(); status('Preparando resposta…'); deliver(text); return;
+        }
+      };
+      instance.onerror = function (event) {
+        if (token !== run || event.error === 'aborted' || event.error === 'no-speech') return;
+        if (/not-allowed|audio-capture|language-not-supported/.test(event.error)) {
+          disable('Escuta desativada. Confira a permissão do microfone e a compatibilidade do navegador.'); return;
+        }
+        failures++;
+        if (failures >= 3) disable('Reconhecimento sem conexão. Toque em ativar por voz para tentar novamente.');
+      };
+      instance.onend = function () {
+        if (token !== run) return;
+        rec = null;
+        if (enabled && !paused) retry = root.setTimeout(listen, Math.min(5000, 450 + failures * 1200));
+      };
+      instance.start();
+    } catch (e) { disable('Não consegui iniciar a escuta. Confira a permissão do microfone.'); }
+  }
+  root.AguirraWake = {
+    configure: function (options) { report = options.onStatus; deliver = options.onCommand; },
+    toggle: function () { if (enabled) disable(); else { enabled = true; paused = false; failures = 0; status('Permitindo escuta…'); listen(); } },
+    pause: function (value) {
+      if (paused === !!value) return;
+      paused = !!value;
+      if (paused) { stop(); if (enabled) status('Escuta em pausa'); }
+      else if (enabled) listen();
+    },
+    armed: function () { return armed; }
+  };
+}(this));
