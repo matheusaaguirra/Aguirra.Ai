@@ -43,3 +43,24 @@ test('Permission denial and unsupported browsers stop the wake loop', () => {
   const unsupported = setup(false); unsupported.wake.toggle();
   assert.equal(unsupported.statuses.at(-1)[1], false);
 });
+
+test('Hidden pages cannot restart recognition or accept late transcripts', () => {
+  const f = setup();
+  const document = { hidden: false };
+  // Expose visibility as the browser does, including before visibilitychange is dispatched.
+  const root: any = {document, isSecureContext: true, SpeechRecognition: function (this: any) {
+    f.instances.push(this); this.start = () => {}; this.abort = () => {};
+  }, setTimeout: () => 1, clearTimeout() {}};
+  vm.runInNewContext(readFileSync('public/microphone.js', 'utf8'), root);
+  root.AguirraWake.configure({onCommand: (text: string) => f.commands.push(text), onStatus() {}});
+  root.AguirraWake.toggle();
+  const old = f.instances.at(-1);
+  document.hidden = true;
+  old.onresult({results: [Object.assign([{transcript: 'Aguirra responda'}], {isFinal: true})]});
+  assert.equal(f.commands.length, 0);
+  root.AguirraWake.pause(true); root.AguirraWake.pause(false);
+  assert.equal(f.instances.length, 1);
+  document.hidden = false;
+  root.AguirraWake.pause(true); root.AguirraWake.pause(false);
+  assert.equal(f.instances.length, 2);
+});

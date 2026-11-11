@@ -24,11 +24,13 @@ function app(signedIn = true) {
   }
   const brainNav = node(); brainNav.getAttribute = () => 'brain';
   let callbacks: any;
+  const lifecycle: Record<string, () => void> = {}, wakePauses: boolean[] = [];
   const context: any = {
     navigator: { userAgent: 'Android 4.4' }, localStorage: { getItem() { return null; }, setItem() {} },
     document: { body: node(), getElementById: element, querySelector: element, querySelectorAll(selector: string) { return selector === '[data-view],[data-open]' ? [brainNav] : []; }, createElement: node, createElementNS: node, createTextNode: (text: string) => ({ textContent: text }), addEventListener() {} },
+    addEventListener(name: string, fn: () => void) { lifecycle[name] = fn; },
     location: { search: '' }, scrollTo() {}, matchMedia() { return { matches: true }; }, setTimeout() { return 1; }, clearTimeout() {}, setInterval() {}, XMLHttpRequest: XHR,
-    AguirraWake: { pause() {}, configure() {}, toggle() {} },
+    AguirraWake: { pause(value: boolean) { wakePauses.push(!!value); }, configure() {}, toggle() {} },
     AguirraMicrophone: { configure() {}, cancel() {}, setServer() {} },
     AguirraVoice: { configure(value: any) { callbacks = value; }, cleanText: (text: string) => text, prime() {}, clearCache() {}, stop() { callbacks?.onState('idle'); }, setServer() {}, setEleven() {}, setVoice() {}, voices() { return []; }, spectrum() { return null; }, speak(text: string, id: string | null) { spoken.push({ text, id }); callbacks.onState('speaking'); callbacks.onCaption(text); } },
   };
@@ -40,7 +42,7 @@ function app(signedIn = true) {
   const data = { memories: [], threads: [], messages: [], topics: [], settings: { memory_enabled: true } };
   requests.shift().respond({ user: signedIn ? { id: 'owner', email: 'test@example.com' } : null, elevenlabs_ready: true });
   requests.shift().respond(data);
-  return { nodes, spoken, requests, data, openBrain() { (brainNav as any).onclick(); }, send(text: string) { element('home-input').value = text; element('home-form').onsubmit({ preventDefault() {} }); } };
+  return { nodes, spoken, requests, data, lifecycle, wakePauses, openBrain() { (brainNav as any).onclick(); }, send(text: string) { element('home-input').value = text; element('home-form').onsubmit({ preventDefault() {} }); } };
 }
 test('Signed-in identity speaks before history persistence and is never spoken twice', () => {
   const page = app(); page.send('Quem é você?');
@@ -148,4 +150,17 @@ test('A map point can reach notes and linked questions outside the visible page'
   const note = connections().filter((n: any) => n.childNodes[0].textContent === 'Estudar memória RAM');
   assert.equal(note.length, 1);
   assert.equal(note[0].childNodes[1].childNodes[0].textContent, 'Origem da nota');
+});
+
+
+test('Leaving the page keeps wake listening paused through late responses until pageshow', () => {
+  const page = app();
+  page.send('Explique memória RAM');
+  page.lifecycle.pagehide();
+  assert.equal(page.wakePauses.at(-1), true);
+  page.requests.shift().respond({reply: 'RAM guarda dados temporários.'});
+  assert.equal(page.wakePauses.at(-1), true);
+  page.lifecycle.pageshow();
+  // Voice playback still owns the microphone pause after returning.
+  assert.equal(page.wakePauses.at(-1), true);
 });

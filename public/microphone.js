@@ -61,7 +61,7 @@
   }
   function disable(text) { enabled = false; stop(); status(text || 'Ativar por voz'); }
   function listen() {
-    if (!enabled || paused || rec) return;
+    if (!enabled || paused || rec || (root.document && root.document.hidden)) return;
     var Recognition = root.SpeechRecognition || root.webkitSpeechRecognition, token = ++run;
     if (!Recognition || root.isSecureContext === false) { disable('Ativação por voz indisponível neste navegador. Use o microfone.'); return; }
     try {
@@ -69,7 +69,7 @@
       instance.lang = 'pt-BR'; instance.continuous = true; instance.interimResults = false;
       instance.onstart = function () { if (token === run) status(armed ? 'Estou ouvindo seu pedido…' : 'Diga “Aguirra”'); };
       instance.onresult = function (event) {
-        if (token !== run || submitted) return;
+        if (token !== run || submitted || (root.document && root.document.hidden)) return;
         failures = 0;
         for (var i = event.resultIndex || 0; i < event.results.length; i++) {
           if (!event.results[i].isFinal) continue;
