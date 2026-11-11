@@ -4,6 +4,8 @@ Cada pergunta do histórico tem um ponto. Uma resposta bem-sucedida forma uma me
 
 O mapa agrupa os pontos por assunto. Toque no assunto para filtrar, arraste o fundo para navegar e use os controles de zoom. Abra uma pergunta ou memória para ler a resposta, ver as fontes, ouvir ou consultar de novo. A visualização mostra até 60 perguntas por página do histórico carregado.
 
+As linhas tracejadas ligam perguntas e notas que compartilham uma expressão, uma operação, uma data ou termos relevantes. O navegador calcula até três dessas ligações por ponto com os dados já carregados, inclusive para registros antigos. As linhas verdes indicam uma relação registrada, como a origem de uma nota ou uma resposta reutilizada. Em **Pontos conectados**, é possível ver o motivo de cada ligação e abrir o outro registro, inclusive em outra página do mapa.
+
 A recuperação considera a pergunta, a validade da resposta e o contexto atual do núcleo. Uma reformulação reconhecida pode reutilizar uma resposta válida. Uma pergunta com outra intenção pode receber até três pontos relacionados como contexto para uma nova geração. Os registros antigos aparecem no grafo mesmo quando precisam de nova consulta para habilitar o reaproveitamento. Notícias e dados mutáveis exigem informação atual.
 
 ## Persistência na web

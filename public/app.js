@@ -3,7 +3,7 @@
   var M = window.AguirraMemory, A = window.AguirraAnswers, storageKey = 'aguirra.local.v1', preferencesKey = 'aguirra.preferences.v1';
   var user = null, localApi = false, voiceServer = false, googleLoginReady = false, sessionReady = false, busy = false, activeView = 'home', memoryFilter = 'all', editingMemory = null, authMode = 'login', toastTimer, modalFocus = null;
   var graphTopic = null, visitorAvailable = false, importing = false;
-  var G = window.AguirraGraph;
+  var G = window.AguirraGraph, mapIndex;
   var elevenReady = false, micProcessing = false, lastDataSync = 0, questionPage = 0, selectedQuestion = null;
   var oldAndroid = /Android 4\./.test(navigator.userAgent), state = empty(), preferences = readJSON(preferencesKey, { low_power: oldAndroid, voice: true });
   if (preferences.voice_provider_version !== 1) { preferences.voice_name = '__elevenlabs__'; preferences.voice_provider_version = 1; savePreferences(); }
@@ -47,12 +47,13 @@
   function tick() { var d = new Date(), months = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro']; $('clock-label').textContent = localDate(d, true); $('date-label').textContent = d.getDate() + ' de ' + months[d.getMonth()] + ', ' + d.getFullYear(); }
   function render() {
     var points = A.pairs(state.messages), count = state.memories.length + points.length;
+    mapIndex = G.relations(points, state.memories);
     var answerCount = G.memoryCount(points), notes = state.memories.length;
     $('home-memory-count').textContent = String(answerCount);
     $('home-memory-label').textContent = answerCount === 1 ? 'memória de resposta' : 'memórias de resposta';
     $('nav-memory-count').textContent = String(count);
     $('mini-map-wrap').hidden = count === 0;
-    if (count) G.draw($('mini-brain'), G.network(points.slice(-50), state.memories.slice(0, 12)), null, null, true);
+    if (count) G.draw($('mini-brain'), G.network(points.slice(-50), state.memories.slice(0, 12), mapIndex), null, null, true);
     $('context-description').textContent = points.length + (points.length === 1 ? ' pergunta' : ' perguntas') + ' · ' + notes + (notes === 1 ? ' nota' : ' notas');
     $('last-point').hidden = count === 0;
     var latestQuestion = points.length ? points[points.length - 1].question : null, latestNote = state.memories[0];
@@ -61,7 +62,7 @@
     $('account-name').textContent = user ? (user.email || 'Sua conta') : 'Seu espaço pessoal'; wipe($('avatar')); $('avatar').appendChild(icon('user')); $('account-state').textContent = user ? (localApi ? 'Memória no seu computador' : 'Memória sincronizada') : 'Visitante · Supabase';
     renderSettings(); if (activeView === 'brain') renderBrain(); if (activeView === 'history') renderHistory();
   }
-  function addMessage(role, text, failed) { var m = { id: uid(), thread_id: state.log_id, role: role, content: text, created_at: new Date().toISOString(), sources: [], failed: !!failed }; state.messages.push(m); return m; }
+  function addMessage(role, text, failed) { var m = { id: uid(), thread_id: state.log_id, role: role, content: text, created_at: new Date().toISOString(), sources: [], failed: !!failed }; state.messages.push(m); mapIndex = null; return m; }
   function ensureLog() { if (!state.log_id) state.log_id = uid(); }
   function send(text, forceRefresh) {
     text = String(text || '').trim(); if (!text || busy || micProcessing) return; if (!sessionReady) { toast('Conectando ao Aguirra. Envie novamente em um instante.'); return; }
@@ -114,7 +115,9 @@
   }
   function svgEl(tag, attrs, content) { var n = document.createElementNS('http://www.w3.org/2000/svg', tag); for (var k in attrs) if (Object.prototype.hasOwnProperty.call(attrs, k)) n.setAttribute(k, attrs[k]); if (content !== undefined) n.textContent = content; return n; }
   function renderQuestionMap() {
-    var all = A.pairs(state.messages).reverse(), query = M.normalize($('question-search').value), list = all.filter(function (p) { return (!graphTopic || G.subject(p.question.content)===graphTopic) && (!query || M.normalize(p.question.content+' '+(p.answer ? p.answer.content : '')).indexOf(query)!==-1); });
+    var all = A.pairs(state.messages).reverse(), query = M.normalize($('question-search').value);
+    if (!mapIndex) mapIndex = G.relations(all, state.memories);
+    var list = all.filter(function (p) { return (!graphTopic || mapIndex.byId['q/' + p.question.id].info.group === graphTopic) && (!query || M.normalize(p.question.content+' '+(p.answer ? p.answer.content : '')).indexOf(query)!==-1); });
     var totalPages = Math.max(1, Math.ceil(list.length / 60)); questionPage = Math.max(0, Math.min(questionPage, totalPages - 1));
     $('brain-summary').textContent = all.length+(all.length===1?' pergunta · ':' perguntas · ')+G.memoryCount(all)+(G.memoryCount(all)===1?' memória de resposta · ':' memórias de resposta · ')+state.memories.length+(state.memories.length===1?' nota pessoal':' notas pessoais');
     var pages=$('question-pages'), svg=$('brain-svg'), index=$('question-list'), i;
@@ -127,9 +130,9 @@
     var visible = list.slice(questionPage * 60, (questionPage + 1) * 60);
     var visibleNotes = state.memories.filter(function (note) {
       return (!query || M.normalize(note.content).indexOf(query) !== -1) &&
-        (!graphTopic || (M.categories[note.category] || 'Anotações') === graphTopic);
+        (!graphTopic || (mapIndex.byId['n/' + note.id].info.group || M.categories[note.category] || 'Anotações') === graphTopic);
     }).slice(0, 40);
-    var graph = G.network(visible, visibleNotes);
+    var graph = G.network(visible, visibleNotes, mapIndex);
     function resetFilter() {
       graphTopic = null; questionPage = 0; selectedQuestion = null;
       $('question-search').value = ''; renderBrain();
@@ -150,7 +153,15 @@
     $('map-empty-title').textContent = filtered ? 'Nenhum ponto encontrado' : 'Seu mapa começa com uma pergunta';
     $('map-empty-action').textContent = filtered ? 'Limpar filtros' : 'Ir para a Central';
     $('map-empty-action').onclick = filtered ? resetFilter : function () { go('home'); $('home-input').focus(); };
-    function select(q){selectedQuestion=q.id;renderBrain();var detail=$('question-detail');if(detail.scrollIntoView) detail.scrollIntoView({block:'nearest'});}
+    function select(q) {
+      if (!visible.some(function (p) { return p.question.id === q.id; })) {
+        graphTopic = null; $('question-search').value = '';
+        for (var j = 0; j < all.length; j++) if (all[j].question.id === q.id) questionPage = Math.floor(j / 60);
+      }
+      selectedQuestion = q.id; renderBrain();
+      var detail = $('question-detail');
+      if (detail.scrollIntoView) detail.scrollIntoView({block: 'nearest'});
+    }
     G.draw(svg, graph, function (node) {
       if (node.pair) select(node.pair.question);
       else if (node.note) openMemory(node.note);
@@ -165,6 +176,19 @@
     detail.appendChild(el('p', 'question-answer', selected.answer ? window.AguirraVoice.cleanText(selected.answer.content) : 'Esta pergunta ainda não tem uma resposta salva.'));
     var sources = selected.answer && selected.answer.sources || [];
     for (i = 0; i < sources.length; i++) if (/^https:\/\//i.test(sources[i].url)) { var link = el('a', 'source-link', sources[i].title); link.href = sources[i].url; link.target = '_blank'; link.rel = 'noopener noreferrer'; detail.appendChild(link); }
+    var links = mapIndex.byId['q/' + selectedQuestion].links;
+    if (links.length) {
+      var section = el('div', 'graph-links');
+      section.appendChild(el('h4', '', 'Pontos conectados'));
+      links.forEach(function (link) {
+        var record = mapIndex.byId[link.id].record, question = record.question;
+        var btn = el('button', '', question ? question.content : record.content);
+        btn.type = 'button'; btn.appendChild(el('small', '', link.reason));
+        btn.onclick = function () { if (question) select(question); else openMemory(record); };
+        section.appendChild(btn);
+      });
+      detail.appendChild(section);
+    }
     var actions = el('div', 'question-actions');
     if (selected.answer && !selected.answer.failed) { var hear = el('button', 'quiet-button', 'Ouvir resposta'); hear.type = 'button'; hear.onclick = function () { if (busy || micProcessing) return; presentResponse(selected.answer.content, selected.answer); window.AguirraVoice.speak(lastReply, lastReplyId); }; actions.appendChild(hear); }
     var refresh = el('button', 'quiet-button', 'Consultar de novo'); refresh.type = 'button'; refresh.onclick = function () { send(selected.question.content, true); }; actions.appendChild(refresh);
@@ -179,7 +203,7 @@
     var list = $('memory-list'); wipe(list); var items = state.memories.filter(function (m) { return memoryFilter === 'all' || m.category === memoryFilter; });
     if (!items.length) { var emptyState = el('div', 'empty-state'); emptyState.appendChild(el('strong', '', 'Nenhuma nota pessoal nesta seleção.')); emptyState.appendChild(el('span', '', 'Guarde uma preferência ou um objetivo para personalizar respostas futuras.')); list.appendChild(emptyState); }
     for (i = 0; i < items.length; i++) (function (m) { var card = el('article', 'memory-card'); card.appendChild(el('span', 'section-label', M.categories[m.category] || 'Anotações')); card.appendChild(el('p', '', m.content)); card.appendChild(el('div', 'memory-meta', (m.origin === 'declared' ? 'DECLARADO POR VOCÊ' : 'GUARDADO POR VOCÊ') + ' · ' + localDate(m.updated_at))); var actions = el('div', 'memory-actions'), edit = el('button', '', 'Editar'), remove = el('button', '', 'Esquecer'); edit.onclick = function () { openMemory(m); }; remove.onclick = function () { deleteMemory(m); }; actions.appendChild(edit); actions.appendChild(remove); card.appendChild(actions); list.appendChild(card); }(items[i]));
-    var topics = $('topic-list'); wipe(topics); var subjectTotals=Object.create(null); A.pairs(state.messages).forEach(function(p){var subject=G.subject(p.question.content);subjectTotals[subject]=(subjectTotals[subject]||0)+1;}); var sorted = Object.keys(subjectTotals).map(function(name){return {name:name,count:subjectTotals[name]};}).sort(function (a, b) { return b.count - a.count; });
+    var topics = $('topic-list'); wipe(topics); var subjectTotals=Object.create(null); A.pairs(state.messages).forEach(function(p){var subject=mapIndex.byId['q/' + p.question.id].info.group;if (!subject) return;subjectTotals[subject]=(subjectTotals[subject]||0)+1;}); var sorted = Object.keys(subjectTotals).map(function(name){return {name:name,count:subjectTotals[name]};}).sort(function (a, b) { return b.count - a.count; });
     if (!sorted.length) topics.appendChild(el('p', '', 'Os assuntos aparecerão conforme você conversar.'));
     for (i = 0; i < sorted.length; i++) topics.appendChild(el('span', 'topic-chip', sorted[i].name + ' · ' + sorted[i].count));
   }
@@ -250,8 +274,8 @@
     var center = h / 2, height = Math.min(h * .44, w * .19);
     var ink = ctx.createLinearGradient(w * .04, 0, w * .96, 0);
     ink.addColorStop(0, 'rgba(125,91,186,0)');
-    ink.addColorStop(.16, '#9060dc'); ink.addColorStop(.42, '#b087ff');
-    ink.addColorStop(.58, '#ead5ff'); ink.addColorStop(.80, '#a783ed');
+    ink.addColorStop(.16, '#8d83ea'); ink.addColorStop(.42, '#aa97ff');
+    ink.addColorStop(.58, '#d5d9ff'); ink.addColorStop(.80, '#9dc8f4');
     ink.addColorStop(1, 'rgba(125,91,186,0)');
     ctx.strokeStyle = ink;
     // A shared envelope keeps the filaments together as the frequency bands change.
@@ -348,7 +372,14 @@
     onState: function (value) { voiceActive = value === 'speaking'; voiceLoading = value === 'loading'; updateOrbState(); if (!voiceActive) hideCaption(); },
     onCaption: function (text) { if (voiceActive) { $('orb-subtitle').textContent = text; $('orb-subtitle').hidden = false; } }, onPulse: function () { orbPulse = 1; }
   });
-  if (window.addEventListener) window.addEventListener('resize', startOrb);
+  var mapResize;
+  if (window.addEventListener) window.addEventListener('resize', function () {
+    startOrb();
+    if (activeView === 'brain') {
+      clearTimeout(mapResize);
+      mapResize = setTimeout(function () { if (activeView === 'brain') renderQuestionMap(); }, 130);
+    }
+  });
   bind(); setupVoice(); tick(); setInterval(tick, 15000); render(); startOrb();
   if (window.speechSynthesis) window.speechSynthesis.onvoiceschanged = populateVoices;
   if (/[?&]auth=google-failed(?:&|$)/.test(window.location.search)) { toast('Não foi possível concluir a entrada com Google. Tente novamente.'); if (window.history && window.history.replaceState) window.history.replaceState(null, '', '/'); }

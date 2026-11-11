@@ -94,3 +94,57 @@ test('The brain renders one point per question and lets the user explicitly refr
   actions.childNodes[1].onclick();
   assert.equal(page.requests[0].path, '/api/ask'); assert.equal(page.requests[0].body.force_refresh, true);
 });
+
+test('The map connects old records by their content and exposes the evidence when selected', () => {
+  const page = app();
+  page.send('Quanto é 3x3?');
+  page.requests.shift().respond({ reply: '9' });
+  const questions = ['Quanto é 3x3?', '3 vezes 3 dá quanto?', '4x7 = ?', 'O que aconteceu em 11 de setembro?', 'Quem estava em Nova York no dia 11 de setembro?', 'Quanto tempo demorou a viagem do Titanic?'];
+  questions.forEach((content, i) => {
+    page.data.messages.push({ id: 'q' + i, role: 'user', content, reply_id: 'a' + i } as never,
+      { id: 'a' + i, role: 'assistant', content: 'Resposta ' + i } as never);
+  });
+  page.requests.shift().respond(page.data); page.openBrain();
+  const svg = page.nodes.get('brain-svg');
+  const names = svg.childNodes.map((n: any) => n.attributes['aria-label']);
+  assert.equal(names.filter((n: string) => n === 'Assunto: Matemática').length, 1);
+  assert.equal(names.filter((n: string) => n?.startsWith('Pergunta:')).length, questions.length);
+  assert.ok(svg.childNodes.some((n: any) => n.attributes['stroke-dasharray'] === '5 4'));
+  const activate = (text: string) => svg.childNodes.find((n: any) => n.attributes['aria-label'] === 'Pergunta: ' + text).onclick();
+  activate(questions[0]);
+  const links = () => page.nodes.get('question-detail').childNodes.find((n: any) => n.className === 'graph-links').childNodes.slice(1);
+  assert.deepEqual(links().map((n: any) => n.childNodes[0].textContent).sort(), [questions[1], questions[2]].sort());
+  const same = links().find((n: any) => n.childNodes[0].textContent === questions[1]);
+  assert.equal(same.childNodes[1].childNodes[0].textContent, 'Mesma expressão · 3 × 3');
+  same.onclick();
+  assert.equal(page.nodes.get('question-detail').childNodes[1].childNodes[0].textContent, questions[1]);
+  activate(questions[3]);
+  assert.equal(links().length, 1);
+  assert.equal(links()[0].childNodes[1].childNodes[0].textContent, 'Mesma data · 11 de setembro');
+});
+
+test('A pending question can be opened in the graph while waiting for its first response', () => {
+  const page = app(false);
+  page.send('Quanto é 4x7?');
+  page.openBrain();
+  assert.equal(page.nodes.get('brain-svg').childNodes.filter((n: any) => n.attributes['aria-label'] === 'Pergunta: Quanto é 4x7?').length, 1);
+});
+
+test('A map point can reach notes and linked questions outside the visible page', () => {
+  const page = app(false);
+  page.send('O que é memória RAM?');
+  page.requests.shift().respond({ reply: 'Resposta' });
+  const history = Array.from({ length: 64 }, (_, i) => i === 0 ? 'O que é memória RAM?' : i === 63 ? 'Como funciona RAM?' : 'Pergunta sobre objeto' + i);
+  history.forEach((content, i) => page.data.messages.push({ id: 'q' + i, role: 'user', content } as never));
+  page.data.memories.push({ id: 'n1', category: 'goals', content: 'Estudar memória RAM', source_message_id: 'q0' } as never);
+  page.requests.shift().respond(page.data); page.openBrain();
+  page.nodes.get('question-list').childNodes[0].onclick();
+  const connections = () => page.nodes.get('question-detail').childNodes.find((n: any) => n.className === 'graph-links').childNodes.slice(1);
+  const older = connections().find((n: any) => n.childNodes[0].textContent === history[0]);
+  assert.ok(older); older.onclick();
+  const nodes = page.nodes.get('brain-svg').childNodes;
+  assert.ok(nodes.some((n: any) => n.attributes['aria-label'] === 'Pergunta: ' + history[0]));
+  const note = connections().filter((n: any) => n.childNodes[0].textContent === 'Estudar memória RAM');
+  assert.equal(note.length, 1);
+  assert.equal(note[0].childNodes[1].childNodes[0].textContent, 'Origem da nota');
+});
