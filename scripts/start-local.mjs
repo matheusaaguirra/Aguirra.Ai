@@ -18,4 +18,6 @@ console.log('Aguirra no computador: http://localhost:' + port);
 for (const entries of Object.values(networkInterfaces())) for (const item of entries || []) if (item.family === 'IPv4' && !item.internal && /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(item.address)) console.log('Aguirra no tablet, na mesma rede: http://' + item.address + ':' + port);
 console.log('IA: Ollama local. Banco: SQLite neste computador. Nenhuma API paga.\n');
 const child = spawn(process.execPath, ['scripts/dev.mjs'], { stdio: 'inherit', env: { ...process.env, AGUIRRA_LOCAL: 'true', AGUIRRA_AI_ENABLED: 'true', AGUIRRA_DATA_DIR: dir, OLLAMA_BASE_URL: 'http://127.0.0.1:11434/v1', OLLAMA_MODEL: process.env.OLLAMA_MODEL || 'aguirra-local' } });
+// Preload the local model so the first question does not wait for it to load from disk.
+fetch('http://127.0.0.1:11434/api/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: process.env.OLLAMA_MODEL || 'aguirra-local', keep_alive: '-1' }), signal: AbortSignal.timeout(120000) }).catch(() => {});
 child.on('exit', code => process.exit(code || 0)); process.on('SIGINT', () => child.kill('SIGINT')); process.on('SIGTERM', () => child.kill('SIGTERM'));

@@ -17,6 +17,8 @@ if not exist node_modules (
   call npm ci
   if errorlevel 1 exit /b 1
 )
+rem Mantem o modelo carregado na memoria para nao recarregar a cada pergunta.
+set OLLAMA_KEEP_ALIVE=-1
 ollama list >nul 2>nul
 if errorlevel 1 (
   start "Ollama local" /min ollama serve
