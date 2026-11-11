@@ -63,18 +63,30 @@
   function listen() {
     if (!enabled || paused || rec || (root.document && root.document.hidden)) return;
     var Recognition = root.SpeechRecognition || root.webkitSpeechRecognition, token = ++run;
-    if (!Recognition || root.isSecureContext === false) { disable('Ativação por voz indisponível neste navegador. Use o microfone.'); return; }
+    if (!Recognition || root.isSecureContext === false) { disable('Ativação por voz indisponível. Abra o endereço HTTPS no Google Chrome atualizado e permita o microfone.'); return; }
     try {
       var instance = rec = new Recognition(), submitted = false;
-      instance.lang = 'pt-BR'; instance.continuous = true; instance.interimResults = false;
+      instance.lang = 'pt-BR';
+      // Desktop engines often wait for the continuous session to end before finalizing speech.
+      instance.continuous = /Android|iPhone|iPad|Mobile/i.test((root.navigator || {}).userAgent || '');
+      instance.interimResults = true; instance.maxAlternatives = 3;
       instance.onstart = function () { if (token === run) status(armed ? 'Estou ouvindo seu pedido…' : 'Diga “Aguirra”'); };
       instance.onresult = function (event) {
         if (token !== run || submitted || (root.document && root.document.hidden)) return;
         failures = 0;
         for (var i = event.resultIndex || 0; i < event.results.length; i++) {
-          if (!event.results[i].isFinal) continue;
-          var text = event.results[i][0].transcript.trim();
-          var wake = /\b(?:aguirra|aguira|agirra)\b[\s,:.!?—-]*/i.exec(text);
+          var result = event.results[i], text = result[0].transcript.trim(), wake = null;
+          for (var alternative = 0; alternative < result.length; alternative++) {
+            var candidate = result[alternative].transcript.trim();
+            var found = /\b(?:aguirra|aguira|agirra|aguirre|a guirra)\b[\s,:.!?—-]*/i.exec(candidate);
+            if (!found) found = /^(?:oi[, ]+|ola[, ]+)?a guerra\b[\s,:.!?—-]*/i.exec(candidate);
+            if (found) { text = candidate; wake = found; break; }
+          }
+          if (!result.isFinal) {
+            status(wake || armed ? 'Ouvindo seu pedido…' : 'Ouvindo · ' + text.slice(0, 100));
+            continue;
+          }
+          if (!wake && !armed) status('Ouvi “' + text.slice(0, 100) + '”. Comece o pedido com “Aguirra”.');
           if (wake) {
             armed = true; clearDeadline();
             text = text.slice(wake.index + wake[0].length).trim();
@@ -86,9 +98,13 @@
       };
       instance.onerror = function (event) {
         if (token !== run || event.error === 'aborted' || event.error === 'no-speech') return;
-        if (/not-allowed|audio-capture|language-not-supported/.test(event.error)) {
-          disable('Escuta desativada. Confira a permissão do microfone e a compatibilidade do navegador.'); return;
-        }
+        var errors = {
+          'not-allowed': 'Microfone bloqueado. Permita o microfone deste site no navegador e nas configurações de privacidade do sistema.',
+          'service-not-allowed': 'O serviço de reconhecimento deste navegador está bloqueado. Abra o site no Google Chrome atualizado.',
+          'audio-capture': 'Não foi possível acessar o microfone. Confira a entrada de áudio selecionada no navegador e no sistema.',
+          'language-not-supported': 'Este navegador não oferece reconhecimento em português. Tente o Google Chrome atualizado.'
+        };
+        if (errors[event.error]) { disable(errors[event.error]); return; }
         failures++;
         if (failures >= 3) disable('Reconhecimento sem conexão. Toque em ativar por voz para tentar novamente.');
       };

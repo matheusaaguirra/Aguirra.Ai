@@ -64,3 +64,24 @@ test('Hidden pages cannot restart recognition or accept late transcripts', () =>
   root.AguirraWake.pause(true); root.AguirraWake.pause(false);
   assert.equal(f.instances.length, 2);
 });
+
+test('Desktop finalizes short utterances and recognizes phonetic names and alternate transcripts', () => {
+  const f = setup(); f.wake.toggle();
+  assert.equal(f.instances[0].continuous, false);
+  f.say('a guerra que horas são'); assert.deepEqual(f.commands, ['que horas são']);
+  f.wake.pause(false);
+  f.instances.at(-1).onresult({results: [Object.assign([{transcript: 'qualquer coisa'}, {transcript: 'Aguirre qual é a data'}], {isFinal: true})]});
+  assert.deepEqual(f.commands, ['que horas são', 'qual é a data']);
+});
+test('Interim desktop results provide feedback without sending an unfinished request', () => {
+  const f = setup(); f.wake.toggle();
+  f.instances[0].onresult({results: [Object.assign([{transcript: 'Aguirra me explique'}], {isFinal: false})]});
+  assert.equal(f.commands.length, 0);
+  f.say('Aguirra me explique como funciona RAM'); assert.deepEqual(f.commands, ['me explique como funciona RAM']);
+});
+test('Unavailable recognition services display a specific error and stop retries', () => {
+  const f = setup(); f.wake.toggle(); f.instances[0].onerror({error:'service-not-allowed'});
+  assert.equal(f.statuses.at(-1)[1], false);
+  assert.match(f.statuses.at(-1)[0], /serviço.*bloqueado/);
+  assert.equal(f.tasks.size, 0);
+});
