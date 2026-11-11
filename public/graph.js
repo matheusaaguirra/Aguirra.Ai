@@ -103,7 +103,6 @@
         view.x=view.homeX=fit.x;view.y=view.homeY=fit.y;view.width=fit.width;view.zoom=1;
       }
       frame(el);
-      if(!graph.nodes.length) el.appendChild(svg('text',{x:500,y:325,'text-anchor':'middle',fill:'#bbaaca','font-size':17},'Sua primeira pergunta inicia o mapa.'));
     }
     graph.edges.forEach(function(e){el.appendChild(svg('line',{x1:e.a.x,y1:e.a.y,x2:e.b.x,y2:e.b.y,stroke:e.type==='reuse'?'#c5a1e8':e.type==='context'?'#73a99e':'#625774','stroke-dasharray':e.type==='context'?'3 3':'none','stroke-opacity':e.type==='reuse'?0.85:0.58,'stroke-width':mini?4:e.type==='reuse'?2:1.2}));});
     var boxes=[];
