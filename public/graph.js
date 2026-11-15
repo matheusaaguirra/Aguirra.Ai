@@ -1,7 +1,7 @@
 (function (root) {
   'use strict';
   var A = root.AguirraAnswers, M = root.AguirraMemory;
-  var colors = { question: '#b2a1ff', answer: '#95bded', topic: '#eee7ff', note: '#83d8c6' };
+  var colors = { question: '#e0a458', answer: '#7ea8be', topic: '#f2efe9', note: '#7fb69e' };
   var filler = /^(?:quanto|quantos|quanta|quantas|pq|porque|porq|foi|foram|fez|ficou|aconteceu|aconteceram|acontece|acontecendo|acha|acham|acharia|acho|achou|demora|demorou|tempo|feito|feita|feitos|feitas|sendo|mesmo|mesma|mais|menos|muito|muita|coisa|coisas|algum|alguma|sobre|algo|principal|principais|diga|dizer|fale|falar|faca|cite|conta|contar|seria|queria|quero|estou|estar|estao|esta|sido|teve|ter|fica|ficam|tem|tambem|vezes|vez|com|sem|num|numa|pra|pro|hj|ela|ele|eles|elas|seu|sua|era|eram|entao|qualquer|pelo|pela|meus|minhas|dele|dela|uma|dessa|desse|prefiro|prefere|gosto|quais|maior|menor|melhor|piores?|exemplos?|diferenca|diferencas|preciso|resposta|pergunta|aqui|ali|houve|pessoa|lugar)$/;
   var months = 'janeiro fevereiro marco abril maio junho julho agosto setembro outubro novembro dezembro'.split(' ');
   var opName = { '+': 'adição', '-': 'subtração', '*': 'multiplicação', '/': 'divisão' };
@@ -245,7 +245,7 @@
       if (hit) { adjacent[e.a.id] = true; adjacent[e.b.id] = true; }
       var structural = e.type === 'answer' || e.type === 'topic';
       el.appendChild(svg('line', { x1: e.a.x, y1: e.a.y, x2: e.b.x, y2: e.b.y,
-        stroke: hit ? '#f4ecff' : structural ? '#6b6c88' : inferred ? '#b2a1ff' : '#83d8c6',
+        stroke: hit ? '#f2efe9' : structural ? '#52545c' : inferred ? '#e0a458' : '#7fb69e',
         'stroke-width': mini ? 3.5 : hit ? 2.3 : structural ? 1.2 : 1.8,
         'stroke-opacity': active && !hit ? .22 : structural && !hit ? .72 : .95,
         'stroke-dasharray': inferred ? '5 4' : 'none' }));
@@ -258,13 +258,13 @@
       var name = { topic: 'Assunto', answer: 'Memória de resposta', question: 'Pergunta', note: 'Nota' }[n.type] + ': ' + n.label;
       var g = svg('g', mini ? {} : { tabindex: 0, role: 'button', 'aria-label': name });
       g.appendChild(svg('circle', { cx: n.x, cy: n.y, r: n.radius * (mini ? 1.5 : 1),
-        fill: topic ? '#30294f' : color, stroke: n.id === active ? '#ffffff' : topic ? color : '#191b2c', 'stroke-width': topic || n.id === active ? 2.5 : 1 }));
+        fill: topic ? '#25272b' : color, stroke: n.id === active ? '#f2efe9' : topic ? color : '#151619', 'stroke-width': topic || n.id === active ? 2.5 : 1 }));
       if (topic) g.appendChild(svg('circle', { cx: n.x, cy: n.y, r: 3.3, fill: color }));
       if (!mini) {
         g.appendChild(svg('circle', { cx: n.x, cy: n.y, r: Math.max(14, n.radius + 5), fill: 'none', 'pointer-events': 'all' }));
         g.appendChild(svg('title', {}, name));
         var caption = short(n.caption || n.label, topic ? 24 : 26);
-        var label = svg('text', { fill: topic ? '#f5f2ff' : '#d4d5ec', 'font-family': 'Roboto, Arial, sans-serif', 'font-weight': topic ? '600' : '400', 'pointer-events': 'none' }, caption);
+        var label = svg('text', { fill: topic ? '#f2efe9' : '#c8c4bc', 'font-family': '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif', 'font-weight': topic ? '600' : '400', 'pointer-events': 'none' }, caption);
         g.appendChild(label); labels.push({ n: n, label: label, caption: caption });
         g.onclick = function () { select(n); };
         g.onkeydown = function (event) { if (event.keyCode === 13 || event.keyCode === 32) { event.preventDefault(); select(n); } };

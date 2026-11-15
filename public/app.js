@@ -257,7 +257,7 @@
       onText: function (text) { $('home-input').value = text; }, onNotice: function (text) { $('microphone-status').textContent = text; $('microphone-status').hidden = false; },
       onResult: function (text) { $('home-input').value = text; send(text); }, transcribe: function (audio, callback) { request('POST', '/api/transcribe', { audio: audio }, callback); }
     });
-    document.querySelector('[data-mic]').onclick = function () { if (busy || micProcessing) return; if (!sessionReady) { $('microphone-status').hidden = false; $('microphone-status').textContent = 'Conectando ao Aguirra. Tente novamente em um instante.'; return; } window.AguirraWake.pause(true); window.AguirraVoice.stop(); window.AguirraWake.pause(true); window.AguirraMicrophone.toggle(); };
+    document.querySelector('[data-mic]').onclick = function () { if (busy || micProcessing) return; window.AguirraWake.pause(true); window.AguirraVoice.stop(); window.AguirraWake.pause(true); window.AguirraMicrophone.toggle(); };
     $('cancel-microphone').onclick = function () { window.AguirraMicrophone.cancel(); };
   }
   var orbTimer = null, orbPhase = 0, bandLevels = [];
@@ -274,10 +274,10 @@
     var samples = preferences.low_power ? 60 : 96, strands = preferences.low_power ? 14 : 28;
     var center = h / 2, height = Math.min(h * .44, w * .19);
     var ink = ctx.createLinearGradient(w * .04, 0, w * .96, 0);
-    ink.addColorStop(0, 'rgba(125,91,186,0)');
-    ink.addColorStop(.16, '#8d83ea'); ink.addColorStop(.42, '#aa97ff');
-    ink.addColorStop(.58, '#d5d9ff'); ink.addColorStop(.80, '#9dc8f4');
-    ink.addColorStop(1, 'rgba(125,91,186,0)');
+    ink.addColorStop(0, 'rgba(224,164,88,0)');
+    ink.addColorStop(.16, '#9c9a94'); ink.addColorStop(.42, '#e0a458');
+    ink.addColorStop(.58, '#f2efe9'); ink.addColorStop(.80, '#7fb69e');
+    ink.addColorStop(1, 'rgba(127,182,158,0)');
     ctx.strokeStyle = ink;
     // A shared envelope keeps the filaments together as the frequency bands change.
     var columns = [], i, j;

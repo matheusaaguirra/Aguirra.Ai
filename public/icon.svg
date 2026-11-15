@@ -1,8 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
   <title>Aguirra</title>
-  <path d="M32 5 53 17v24L32 54 11 42V18Z" fill="#25213d"/>
-  <path d="M32 7 51 18v12L37 22 25 29 16 24V16Z" fill="#c4b8ff"/>
-  <path d="m53 21 0 22-19 11V38l-12-7 0-10 9-5 0 12Z" fill="#8f8cf0"/>
-  <path d="m30 56-19-11V23l14 8v14l9 5Z" fill="#aa97ff"/>
-  <path d="m26 29 6-3 6 3v7l-6 3-6-3Z" fill="#f4f3ff"/>
+  <path d="M32 5 53 17v24L32 54 11 42V18Z" fill="#1c1d20"/>
+  <path d="M32 7 51 18v12L37 22 25 29 16 24V16Z" fill="#f2efe9"/>
+  <path d="m53 21 0 22-19 11V38l-12-7 0-10 9-5 0 12Z" fill="#9c9a94"/>
+  <path d="m30 56-19-11V23l14 8v14l9 5Z" fill="#e0a458"/>
+  <path d="m26 29 6-3 6 3v7l-6 3-6-3Z" fill="#f2efe9"/>
 </svg>

@@ -15,3 +15,40 @@ test('Fallback recording releases microphone tracks before transcription and ign
   vm.runInNewContext(script,root);root.AguirraMicrophone.setServer(true);root.AguirraMicrophone.configure({onState:(s:string)=>states.push(s),onResult:(s:string)=>results.push(s),transcribe:(data:string,cb:any)=>{uploads++;assert.equal(Buffer.from(data,'base64').length,32044);callback=cb;}});
   root.AguirraMicrophone.toggle();assert.equal(states.at(-1),'listening');processAudio.onaudioprocess({inputBuffer:{getChannelData:()=>new Float32Array(16000).fill(.2)}});root.AguirraMicrophone.toggle();assert.equal(states.at(-1),'transcribing');assert.equal(stopped,1);assert.equal(uploads,1);root.AguirraMicrophone.cancel();callback(null,{text:'stale'});assert.equal(results.length,0);
 });
+
+test('Interim transcript is preserved on stop and network/service errors fall back automatically to recording', () => {
+  const f = fixture();
+  f.root.AguirraMicrophone.toggle();
+  f.rec.onstart();
+  f.rec.onresult({ results: [Object.assign([{ transcript: 'Qual a previsão de hoje' }], { isFinal: false })] });
+  f.root.AguirraMicrophone.toggle();
+  assert.deepEqual(f.results, ['Qual a previsão de hoje']);
+
+  let mediaRequests = 0, resumed = 0;
+  const states: string[] = [], notices: string[] = [];
+  const root: any = {
+    isSecureContext: true, setTimeout: () => 1, clearTimeout() {},
+    btoa: (s: string) => Buffer.from(s, 'binary').toString('base64'),
+    SpeechRecognition: function (this: any) { this.start = () => { this.onerror({ error: 'network' }); }; this.abort = () => {}; },
+    navigator: { mediaDevices: { getUserMedia: () => { mediaRequests++; return { then: (done: any) => done({ getTracks: () => [{ stop() {} }] }) }; } } },
+    AudioContext: function (this: any) {
+      this.sampleRate = 16000; this.destination = {}; this.close = () => {}; this.resume = () => { resumed++; };
+      this.createMediaStreamSource = () => ({ connect() {}, disconnect() {} });
+      this.createAnalyser = () => ({ frequencyBinCount: 4, getByteFrequencyData() {} });
+      this.createGain = () => ({ gain: { value: 0 }, connect() {}, disconnect() {} });
+      this.createScriptProcessor = () => ({ connect() {}, disconnect() {}, onaudioprocess: null });
+    }
+  };
+  vm.runInNewContext(script, root);
+  root.AguirraMicrophone.setServer(true);
+  root.AguirraMicrophone.configure({ onState: (s: string) => states.push(s), onNotice: (s: string) => notices.push(s) });
+  root.AguirraMicrophone.toggle();
+  assert.equal(mediaRequests, 1);
+  assert.ok(resumed >= 1);
+  assert.equal(states.at(-1), 'listening');
+
+  root.AguirraMicrophone.toggle();
+  assert.equal(states.at(-1), 'idle');
+  assert.match(notices.at(-1)!, /Não capturei áudio/);
+});
+
