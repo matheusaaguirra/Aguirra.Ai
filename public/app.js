@@ -3,7 +3,7 @@
   var M = window.AguirraMemory, A = window.AguirraAnswers, storageKey = 'aguirra.local.v1', preferencesKey = 'aguirra.preferences.v1';
   var user = null, localApi = false, voiceServer = false, googleLoginReady = false, sessionReady = false, busy = false, activeView = 'home', memoryFilter = 'all', editingMemory = null, authMode = 'login', toastTimer, modalFocus = null;
   var graphTopic = null, visitorAvailable = false, importing = false;
-  var G = window.AguirraGraph, mapIndex, pageAway = false;
+  var G = window.AguirraGraph, D = window.AguirraDesktop, mapIndex, pageAway = false;
   var elevenReady = false, micProcessing = false, lastDataSync = 0, questionPage = 0, selectedQuestion = null;
   var oldAndroid = /Android 4\./.test(navigator.userAgent), state = empty(), preferences = readJSON(preferencesKey, { low_power: oldAndroid, voice: true });
   if (preferences.voice_provider_version !== 1) { preferences.voice_name = '__elevenlabs__'; preferences.voice_provider_version = 1; savePreferences(); }
@@ -68,6 +68,17 @@
     text = String(text || '').trim(); if (!text || busy || micProcessing) return; if (!sessionReady) { toast('Conectando ao Aguirra. Envie novamente em um instante.'); return; }
     if (text.length > 4000) { toast('Sua mensagem deve ter até 4.000 caracteres.'); return; }
     text = M.redact(text); window.AguirraVoice.prime(); window.AguirraMicrophone.cancel(); window.AguirraVoice.stop(); go('home'); $('voice-hint').hidden = true; $('home-input').value = '';
+    var desktopAction = !forceRefresh && D && D.getToken() ? D.matchCommand(text) : null;
+    if (desktopAction) {
+      setBusy(true);
+      D.execute(desktopAction, function (err, result) {
+        setBusy(false);
+        if (err) { toast(err.message); speak(err.message, { id: null }); return; }
+        toast(result.reply);
+        speak(result.reply, { id: null });
+      });
+      return;
+    }
     var reused = !forceRefresh && Date.now() - lastDataSync < 60000 ? A.find(text, state.messages, state.memories, state.settings.memory_enabled) : null;
     ensureLog(); var pending = addMessage('user', text), payload = { message: text, request_id: pending.id, force_refresh: !!forceRefresh };
     setBusy(true);
@@ -221,6 +232,16 @@
     iconLabel($('power-shortcut'), 'power', preferences.low_power ? 'Modo econômico ativo' : 'Modo econômico');
     if (window.AguirraVoice) window.AguirraVoice.setServer(voiceServer); window.AguirraVoice.setEleven(elevenReady);
     populateVoices();
+    if (D && $('desktop-token')) $('desktop-token').value = D.getToken();
+  }
+  function checkDesktopStatus(silent) {
+    if (!D || !$('desktop-status')) return;
+    if (!D.getToken()) { $('desktop-status').textContent = 'Desktop não conectado. Cole o Código do PC acima.'; return; }
+    if (!silent) $('desktop-status').textContent = 'Verificando conexão com o PC…';
+    D.ping(function (err, data) {
+      if (err || !data) { $('desktop-status').textContent = (err && err.message) || 'Aguirra Desktop não está rodando neste PC.'; return; }
+      $('desktop-status').textContent = data.authenticated ? 'PC conectado (' + data.platform + '). Comandos de voz e texto ativos.' : 'Código do PC inválido. Confira o código no terminal.';
+    });
   }
   function openModal(id) { modalFocus = document.activeElement; $(id).hidden = false; var input = $(id).querySelector('input,textarea'); if (input) input.focus(); updateOrbState(); }
   function closeModal(id) { $(id).hidden = true; if (modalFocus && modalFocus.focus) modalFocus.focus(); updateOrbState(); }
@@ -411,6 +432,7 @@
     $('sync-local').onclick = importPrevious;
     $('export-data').onclick = function () { var data = JSON.stringify({ format: 'aguirra-export-v1', exported_at: new Date().toISOString(), data: state }, null, 2), url; try { var blob = new Blob([data], { type: 'application/json' }); url = (window.URL || window.webkitURL).createObjectURL(blob); var a = el('a', '', 'Baixar dados'); a.href = url; a.download = 'aguirra-meus-dados.json'; document.body.appendChild(a); a.click(); document.body.removeChild(a); setTimeout(function () { (window.URL || window.webkitURL).revokeObjectURL(url); }, 20000); } catch (e) { var exportWindow = window.open('', '_blank'); if (exportWindow) { exportWindow.document.body.appendChild(exportWindow.document.createElement('pre')).textContent = data; } else toast('Seu navegador bloqueou a exportação. Tente pelo computador.'); } };
     $('clear-data').onclick = function () { if (busy) { toast('Aguarde a resposta antes de apagar os dados.'); return; } if (!window.confirm('Apagar todo o histórico, assuntos e memórias' + ' do seu núcleo no Supabase' + '? Essa ação não pode ser desfeita.')) return; window.AguirraVoice.clearCache(); request('DELETE', '/api/data', null, function (err) { if (err) toast(err.message); else { loadData(); toast('Histórico e núcleo apagados da sua conta.'); } }); };
+    if ($('desktop-connect') && D) $('desktop-connect').onclick = function () { D.setToken($('desktop-token').value); checkDesktopStatus(false); };
     $('fullscreen-button').onclick = function () { var root = document.documentElement, enter = root.requestFullscreen || root.webkitRequestFullscreen || root.mozRequestFullScreen; var exit = document.exitFullscreen || document.webkitExitFullscreen || document.mozCancelFullScreen; if (document.fullscreenElement || document.webkitFullscreenElement) { if (exit) exit.call(document); } else if (enter) { var p = enter.call(root); if (p && p.catch) p.catch(function () { toast('O navegador não permitiu a tela cheia.'); }); } else toast('Este navegador não oferece tela cheia.'); };
     if (window.addEventListener) {
       window.addEventListener('pagehide', function () {
@@ -452,7 +474,7 @@
     if (!sessionReady || busy || voiceActive || voiceLoading || listening || micProcessing) { toast('Aguarde o assistente ficar disponível.'); return; }
     window.AguirraVoice.prime(); window.AguirraWake.toggle();
   };
-  bind(); setupVoice(); tick(); setInterval(tick, 15000); render(); startOrb();
+  bind(); setupVoice(); if (D && D.getToken()) checkDesktopStatus(true); tick(); setInterval(tick, 15000); render(); startOrb();
   if (window.speechSynthesis) window.speechSynthesis.onvoiceschanged = populateVoices;
   if (/[?&]auth=google-failed(?:&|$)/.test(window.location.search)) { toast('Não foi possível concluir a entrada com Google. Tente novamente.'); if (window.history && window.history.replaceState) window.history.replaceState(null, '', '/'); }
   $('voice-status').textContent = 'Escolha ElevenLabs para a voz natural ou uma voz do aparelho como alternativa.';
