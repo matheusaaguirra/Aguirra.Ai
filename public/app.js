@@ -270,43 +270,93 @@
     ctx.clearRect(0, 0, w, h);
 
     var spectrum = listening ? window.AguirraMicrophone.spectrum() : window.AguirraVoice.spectrum();
-    var strength = voiceActive || listening ? .95 : (busy || micProcessing || voiceLoading ? .65 : .45);
-    var samples = preferences.low_power ? 60 : 96, strands = preferences.low_power ? 14 : 28;
-    var center = h / 2, height = Math.min(h * .44, w * .19);
-    var ink = ctx.createLinearGradient(w * .04, 0, w * .96, 0);
-    ink.addColorStop(0, 'rgba(224,164,88,0)');
-    ink.addColorStop(.16, '#9c9a94'); ink.addColorStop(.42, '#e0a458');
-    ink.addColorStop(.58, '#f2efe9'); ink.addColorStop(.80, '#7fb69e');
-    ink.addColorStop(1, 'rgba(127,182,158,0)');
-    ctx.strokeStyle = ink;
-    // A shared envelope keeps the filaments together as the frequency bands change.
-    var columns = [], i, j;
-    for (i = 0; i <= samples; i++) {
-      var t = i / samples, envelope = Math.pow(Math.sin(t * Math.PI), 1.6);
-      var bin = spectrum && spectrum.length ? spectrum[Math.floor(t * (spectrum.length - 1) * .65)] / 255 : 0;
-      var level = (bandLevels[i] || 0) * .76 + bin * .24;
-      bandLevels[i] = level;
-      var gain = height * envelope * (.62 + strength * .26 + level * .42 + orbPulse * .10);
-      var carrier = 2 * Math.PI * t;
-      columns.push({
-        x: w * (.035 + .93 * t),
-        axis: center + gain * (.35 * Math.sin(carrier * 1.65 - phase) + .15 * Math.cos(carrier * 3.1 + phase * .5)),
-        front: gain * .66 * Math.sin(carrier * 1.85 + phase * .64),
-        depth: gain * .72 * Math.cos(carrier * 2.15 - phase * .7)
-      });
+    var activeAudio = voiceActive || listening, thinking = busy || micProcessing || voiceLoading;
+    var strength = activeAudio ? 1 : (thinking ? .72 : .42);
+    var cx = w / 2, cy = h / 2, baseR = Math.min(w, h) * .35;
+    var totalEnergy = 0, i, j, k;
+    var bands = 32;
+    for (i = 0; i < bands; i++) {
+      var bin = spectrum && spectrum.length ? spectrum[Math.floor((i / bands) * (spectrum.length - 1) * .65)] / 255 : 0;
+      var lv = (bandLevels[i] || 0) * .72 + bin * .28;
+      bandLevels[i] = lv;
+      totalEnergy += lv;
     }
-    for (j = 0; j < strands; j++) {
-      var u = j / (strands - 1), depth = Math.sin(Math.PI * u);
-      ctx.beginPath();
-      ctx.globalAlpha = j === 0 || j === strands - 1 ? .88 : .21 + .33 * depth;
-      ctx.lineWidth = scale * (j === 0 || j === strands - 1 ? 1.25 : .85);
-      for (i = 0; i < columns.length; i++) {
-        var column = columns[i], y = column.axis + (u * 2 - 1) * column.front + column.depth * depth;
-        if (i) ctx.lineTo(column.x, y); else ctx.moveTo(column.x, y);
+    var avg = totalEnergy / bands;
+    var R = baseR * (1 + avg * .16 + orbPulse * .07 + (activeAudio ? .03 * Math.sin(phase * 2.2) : .015 * Math.sin(phase)));
+
+    var primary = listening ? '127,182,158' : (thinking ? '126,168,190' : '224,164,88');
+    var secondary = listening ? '224,164,88' : (thinking ? '242,239,233' : '127,182,158');
+
+    // Outer energy corona and luminous core
+    var corona = ctx.createRadialGradient(cx, cy, R * .12, cx, cy, R * 1.48);
+    corona.addColorStop(0, 'rgba(242,239,233,' + (.28 + strength * .22 + avg * .18).toFixed(3) + ')');
+    corona.addColorStop(.28, 'rgba(' + primary + ',' + (.24 + strength * .20 + avg * .16).toFixed(3) + ')');
+    corona.addColorStop(.65, 'rgba(' + secondary + ',' + (.07 + avg * .08).toFixed(3) + ')');
+    corona.addColorStop(1, 'rgba(15,16,17,0)');
+    ctx.fillStyle = corona;
+    ctx.beginPath(); ctx.arc(cx, cy, R * 1.48, 0, Math.PI * 2); ctx.fill();
+
+    // Subtle spherical rim
+    ctx.strokeStyle = 'rgba(' + primary + ',' + (.18 + avg * .25).toFixed(3) + ')';
+    ctx.lineWidth = scale * 1.1;
+    ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.stroke();
+
+    // 3D tilted plasma rings on the sphere
+    var rings = preferences.low_power ? 5 : 10;
+    var steps = preferences.low_power ? 44 : 72;
+    var fov = R * 3.4;
+    for (j = 0; j < rings; j++) {
+      var frac = j / rings;
+      var tiltX = frac * Math.PI + phase * (.38 + (j % 3) * .11);
+      var tiltY = frac * Math.PI * 1.618 - phase * (.27 + (j % 2) * .14);
+      var cxT = Math.cos(tiltX), sxT = Math.sin(tiltX);
+      var cyT = Math.cos(tiltY), syT = Math.sin(tiltY);
+      var ringTone = j % 3 === 0 ? '242,239,233' : (j % 2 === 0 ? primary : secondary);
+      ctx.lineWidth = scale * (j % 3 === 0 ? 1.35 : .95);
+      for (i = 0; i < steps; i++) {
+        var a0 = (i / steps) * Math.PI * 2, a1 = ((i + 1) / steps) * Math.PI * 2;
+        var bIdx = Math.floor(((i / steps) * bands)) % bands;
+        var wave = 1 + (bandLevels[bIdx] || 0) * .22 * Math.sin(a0 * 3 + phase * 2.4) + (activeAudio ? .035 : .018) * Math.sin(a0 * 4 - phase * 1.7 + j);
+        var x0 = Math.cos(a0) * R * wave, y0 = Math.sin(a0) * R * wave, z0 = 0;
+        var y0r = y0 * cxT - z0 * sxT, z0r = y0 * sxT + z0 * cxT;
+        var x0f = x0 * cyT + z0r * syT, z0f = -x0 * syT + z0r * cyT;
+
+        var x1 = Math.cos(a1) * R * wave, y1 = Math.sin(a1) * R * wave, z1 = 0;
+        var y1r = y1 * cxT - z1 * sxT, z1r = y1 * sxT + z1 * cxT;
+        var x1f = x1 * cyT + z1r * syT, z1f = -x1 * syT + z1r * cyT;
+
+        var p0 = fov / (fov - z0f), p1 = fov / (fov - z1f);
+        var depthAlpha = Math.max(.08, Math.min(.92, .34 + (z0f / R) * .42 + avg * .22));
+        ctx.strokeStyle = 'rgba(' + ringTone + ',' + depthAlpha.toFixed(3) + ')';
+        ctx.beginPath();
+        ctx.moveTo(cx + x0f * p0, cy + y0r * p0);
+        ctx.lineTo(cx + x1f * p1, cy + y1r * p1);
+        ctx.stroke();
       }
-      ctx.stroke();
     }
-    ctx.globalAlpha = 1;
+
+    // 3D orbiting energy sparks (Fibonacci sphere)
+    var sparks = preferences.low_power ? 14 : 34;
+    var rotY = phase * .55, rotX = phase * .31;
+    var crY = Math.cos(rotY), srY = Math.sin(rotY), crX = Math.cos(rotX), srX = Math.sin(rotX);
+    for (k = 0; k < sparks; k++) {
+      var phi = Math.acos(1 - 2 * (k + .5) / sparks);
+      var theta = Math.PI * (1 + Math.sqrt(5)) * k + phase * .4;
+      var sr = R * (1.02 + (bandLevels[k % bands] || 0) * .18);
+      var sx = sr * Math.sin(phi) * Math.cos(theta);
+      var sy = sr * Math.sin(phi) * Math.sin(theta);
+      var sz = sr * Math.cos(phi);
+      var sx1 = sx * crY + sz * srY, sz1 = -sx * srY + sz * crY;
+      var sy2 = sy * crX - sz1 * srX, sz2 = sy * srX + sz1 * crX;
+      var sp = fov / (fov - sz2);
+      var alpha = Math.max(.12, Math.min(.95, .38 + (sz2 / R) * .5));
+      var dotR = scale * (1.1 + (sz2 / R + 1) * .9) * (1 + avg * .3);
+      ctx.fillStyle = k % 3 === 0 ? 'rgba(242,239,233,' + alpha.toFixed(3) + ')' : 'rgba(' + primary + ',' + alpha.toFixed(3) + ')';
+      ctx.beginPath();
+      ctx.arc(cx + sx1 * sp, cy + sy2 * sp, Math.max(.6, dotR), 0, Math.PI * 2);
+      ctx.fill();
+    }
+
     orbPulse *= .90;
   }
   function startOrb() {
