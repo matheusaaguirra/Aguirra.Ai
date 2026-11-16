@@ -5,7 +5,7 @@ import { AppError } from './db.ts';
 import { claimPublicBudget } from './public-budget.ts';
 import type { Document } from './knowledge.ts';
 import { IDENTITY_PROMPT } from './questions.ts';
-export const GOOGLE_MODEL = 'gemini-3.5-flash-lite';
+export const GOOGLE_MODEL = 'gemini-3.6-flash';
 export const FREE_MODELS = [GOOGLE_MODEL, 'gemini-3.1-flash-lite'] as const;
 export function googleReady() { return process.env.AGUIRRA_GOOGLE_FREE_CHAT === 'confirmed-no-billing' && !!process.env.GOOGLE_GENERATIVE_AI_API_KEY; }
 export interface Answer { reply: string; sources: { title: string; url: string }[]; search_entry_point?: string; mode?: string; }
