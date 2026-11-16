@@ -28,6 +28,9 @@ async function main() {
     return;
   }
 
+  const jsonOutput = process.argv.includes("--json");
+  const progress = jsonOutput ? process.stderr : process.stdout;
+
   const samples = Number(argument("--samples", "5"));
   if (!Number.isInteger(samples) || samples < 1 || samples > 50) {
     throw new Error("--samples precisa ser um número inteiro entre 1 e 50.");
@@ -83,21 +86,21 @@ async function main() {
     };
   }
 
-  console.log("Aquecendo o modelo local...");
+  progress.write("Aquecendo o modelo local...\n");
   await generate("Responda apenas: pronto.", 8);
 
   const latencyRuns = [];
   const latencyPrompt = "Responda em uma frase: por que um assistente pessoal deve proteger a memória do usuário?";
   for (let i = 0; i < samples; i++) {
     latencyRuns.push(await generate(latencyPrompt, 48));
-    process.stdout.write("\rLatência: " + (i + 1) + "/" + samples);
+    progress.write("\rLatência: " + (i + 1) + "/" + samples);
   }
 
   const throughputRuns = [];
   const throughputPrompt = "Explique em até cinco frases como um assistente pessoal pode combinar memória local, privacidade e respostas úteis. Use linguagem simples e objetiva.";
   for (let i = 0; i < samples; i++) {
     throughputRuns.push(await generate(throughputPrompt, 128));
-    process.stdout.write("\rVazão:   " + (i + 1) + "/" + samples);
+    progress.write("\rVazão:   " + (i + 1) + "/" + samples);
   }
 
   const latencies = latencyRuns.map(run => run.wallSeconds);
@@ -132,9 +135,9 @@ async function main() {
     writeFileSync(absolutePath, JSON.stringify(summary, null, 2) + "\n", "utf8");
   }
 
-  process.stdout.write("\n");
-  if (process.argv.includes("--json")) {
-    console.log(JSON.stringify(summary, null, 2));
+  if (!jsonOutput) process.stdout.write("\n");
+  if (jsonOutput) {
+    process.stdout.write(JSON.stringify(summary, null, 2) + "\n");
   } else {
     console.log("\nAguirra · benchmark local");
     console.log("Modelo: " + model + " · Amostras por teste: " + samples);
