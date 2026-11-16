@@ -16,6 +16,7 @@
     "dev:agent": "eve dev --no-ui",
     "test": "node --experimental-strip-types --test tests/*.test.ts && npm run test:legacy",
     "local": "node scripts/start-local.mjs",
+    "bench:local": "node scripts/bench-local.mjs",
     "desktop": "node desktop/aguirra-desktop.mjs",
     "test:legacy": "node scripts/check-legacy.mjs"
   },
