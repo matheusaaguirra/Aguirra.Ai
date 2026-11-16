@@ -20,6 +20,28 @@ test('Retrieval includes preferences and relevant projects, not unrelated notes'
   assert.deepEqual(relevant(memories, 'Quero desenvolver o WealthOS').map(m => m.key), ['wealthos', 'short']);
   assert.deepEqual(relevant(memories.filter(m => m.key !== 'short'), 'Notícias hoje').map(m => m.key), []);
 });
+test('BM25-style retrieval ranks memories by matching terms', () => {
+  const memories: Memory[] = [
+    { category: 'notes', key: 'generic', content: 'Conhecimento geral sobre tecnologia', origin: 'manual' },
+    { category: 'projects', key: 'wealthos', content: 'Projeto WealthOS com Angular e TypeScript', origin: 'manual' },
+    { category: 'notes', key: 'typescript', content: 'Estudo de TypeScript', origin: 'manual' },
+  ];
+  const ranked = relevant(memories, 'Quero pesquisar WealthOS e TypeScript');
+  assert.equal(ranked[0].key, 'wealthos');
+  assert.ok(ranked.some(memory => memory.key === 'typescript'));
+  assert.ok(!ranked.some(memory => memory.key === 'generic'));
+});
+
+test('Profile and preferences remain useful baseline context without matching unrelated notes', () => {
+  const memories: Memory[] = [
+    { category: 'profile', key: 'name', content: 'Nome: Matheus', origin: 'declared' },
+    { category: 'preferences', key: 'short', content: 'Prefere respostas curtas', origin: 'declared' },
+    { category: 'notes', key: 'plants', content: 'Cultivar girassóis', origin: 'manual' },
+  ];
+  const ranked = relevant(memories, 'Como está o mercado de tecnologia?');
+  assert.deepEqual(ranked.map(memory => memory.key), ['name', 'short']);
+});
+
 test('Topic frequency is not a preference or fact', () => { assert.ok(topics('O que acontece no Brasil hoje?').includes('Notícias')); assert.equal(extract('O que acontece no Brasil hoje?').length, 0); });
 test('Legacy client and server apply identical memory rules', () => {
   const context: any = {}; vm.runInNewContext(readFileSync('public/memory-core.js', 'utf8'), context);
