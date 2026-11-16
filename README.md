@@ -59,6 +59,17 @@ npm run local
 
 O [guia sem custo](docs/sem-custo.md) explica instalação, rede, código de acesso e limites. O Ollama permanece restrito ao computador. A integração opcional com Gemini usa um projeto gratuito sem faturamento, conforme o [guia de ativação](docs/google-gratuito.md). Não há fallback para uma API paga.
 
+### Medir o desempenho da IA local
+
+O benchmark inspirado no OpenJarvis mede latência, mediana (p50), p95 e tokens por segundo diretamente no Ollama. Ele faz uma chamada de aquecimento e não envia prompts, respostas ou memórias para serviços externos.
+
+```bash
+npm run bench:local
+npm run bench:local -- --samples 10 --json
+```
+
+Consulte [a adaptação do OpenJarvis](docs/openjarvis-adaptation.md) para entender as métricas e comparar modelos sem ativar APIs pagas.
+
 ### Hospedagem online opcional
 
 A versão online aceita perguntas sem conta, com histórico e núcleo separados por navegador, além de manchetes RSS. A conversa usa Gemini 3.5 Flash-Lite gratuito; fontes públicas vêm de Wikipedia e RSS. A pesquisa integrada do Google fica desativada para evitar o recurso pago; veja [como ativar](docs/google-gratuito.md). A sincronização usa o Supabase Free e a hospedagem Vercel Hobby, respeitando suas cotas. Sem a chave e AGUIRRA_GOOGLE_FREE_CHAT=confirmed-no-billing, a geração de IA fica desativada na hospedagem. O aplicativo não faz upgrade automático de planos.
